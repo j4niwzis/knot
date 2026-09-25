@@ -1330,7 +1330,12 @@ template <class Type>
 constexpr value object_to_tree(Type&& made, const bool* seen) {
   constexpr std::size_t size = schema<std::remove_cvref_t<Type>>::size;
   using plain = std::remove_cvref_t<Type>;
-  value::object members;
+  // The members are already in the order of their keys: gathered straight
+  // into the flat map's two vectors, room for all of them taken once.
+  value::object::key_container_type keys;
+  value::object::mapped_container_type values;
+  keys.reserve(size);
+  values.reserve(size);
   [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
     (([&] {
        if (seen && !seen[Rank]) return;
@@ -1338,16 +1343,16 @@ constexpr value object_to_tree(Type&& made, const bool* seen) {
        using member_type = std::remove_cvref_t<decltype(member)>;
        if constexpr (is_optional<member_type>::value) {
          if (!member) return;
-         members.emplace_hint(members.end(), std::string(key_text<plain, Rank>),
-                              to_tree(std::move(*member)));
+         keys.emplace_back(key_text<plain, Rank>);
+         values.push_back(to_tree(std::move(*member)));
        } else {
-         members.emplace_hint(members.end(), std::string(key_text<plain, Rank>),
-                              to_tree(std::move(member)));
+         keys.emplace_back(key_text<plain, Rank>);
+         values.push_back(to_tree(std::move(member)));
        }
      }()),
      ...);
   }(std::make_index_sequence<size>{});
-  return value(std::move(members));
+  return value(value::object(std::sorted_unique, std::move(keys), std::move(values)));
 }
 
 template <class Type>
