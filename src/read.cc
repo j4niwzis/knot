@@ -109,10 +109,85 @@ class cursor {
   int depth = 0;
 };
 
+// ---------------------------------------------------------------------------
+// Runs found 32 bytes at a time, where the text is in memory.
+//
+// Clang's vector types: a compare of 32 bytes at once, the answers packed into
+// a 32-bit mask, the first set bit where the run ends. SSE or AVX on x86, NEON
+// on ARM, from the same code. At compile time, and for what is left at the
+// end, a byte at a time.
+
+using bytes32 = unsigned char __attribute__((vector_size(32)));
+using flags32 = bool __attribute__((ext_vector_type(32)));
+
+inline constexpr std::size_t lane = 32;
+
+[[nodiscard]] inline std::uint32_t mask_of(auto flags) {
+  return __builtin_bit_cast(std::uint32_t, __builtin_convertvector(flags, flags32));
+}
+
+[[nodiscard]] inline bytes32 load32(const char* at) {
+  bytes32 chunk;
+  std::memcpy(&chunk, at, lane);
+  return chunk;
+}
+
+// Whether a byte of a string is itself and nothing else: printable ASCII, and
+// not a quote or a backslash.
+[[nodiscard]] constexpr bool plain_byte(unsigned char byte) {
+  return byte >= 0x20 && byte < 0x80 && byte != '"' && byte != '\\';
+}
+
+// How many bytes from here are plain.
+[[nodiscard]] constexpr std::size_t plain_run(std::string_view text) {
+  std::size_t done = 0;
+  if !consteval {
+    while (done + lane <= text.size()) {
+      const bytes32 chunk = load32(text.data() + done);
+      const bytes32 over = chunk - static_cast<unsigned char>(0x20);
+      const std::uint32_t stop =
+          mask_of(over >= static_cast<unsigned char>(0x60)) |
+          mask_of(chunk == static_cast<unsigned char>('"')) |
+          mask_of(chunk == static_cast<unsigned char>('\\'));
+      if (stop != 0) return done + static_cast<std::size_t>(std::countr_zero(stop));
+      done += lane;
+    }
+  }
+  while (done != text.size() && plain_byte(static_cast<unsigned char>(text[done]))) ++done;
+  return done;
+}
+
+[[nodiscard]] constexpr bool space_byte(unsigned char byte) {
+  return byte == ' ' || byte == '\n' || byte == '\r' || byte == '\t';
+}
+
+// How many bytes from here are white space.
+[[nodiscard]] constexpr std::size_t space_run(std::string_view text) {
+  std::size_t done = 0;
+  // Most runs are one space or none: asked of one byte before of a vector.
+  if (text.empty() || !space_byte(static_cast<unsigned char>(text[0]))) return 0;
+  if !consteval {
+    while (done + lane <= text.size()) {
+      const bytes32 chunk = load32(text.data() + done);
+      const std::uint32_t white =
+          mask_of(chunk == static_cast<unsigned char>(' ')) |
+          mask_of(chunk == static_cast<unsigned char>('\n')) |
+          mask_of(chunk == static_cast<unsigned char>('\r')) |
+          mask_of(chunk == static_cast<unsigned char>('\t'));
+      if (white != 0xffffffffu) return done + static_cast<std::size_t>(std::countr_one(white));
+      done += lane;
+    }
+  }
+  while (done != text.size() && space_byte(static_cast<unsigned char>(text[done]))) ++done;
+  return done;
+}
+
 // White space, where ordinary JSON allows it.
 template <bool Canonical, class Cursor>
 constexpr void space(Cursor& in) {
-  if constexpr (!Canonical) {
+  if constexpr (!Canonical && Cursor::in_memory) {
+    in.skip(space_run(in.rest()));
+  } else if constexpr (!Canonical) {
     for (int letter = in.peek();
          letter == ' ' || letter == '\t' || letter == '\n' || letter == '\r';
          letter = in.peek()) {
@@ -265,12 +340,7 @@ constexpr bool read_string_into(Cursor& in, Sink&& out) {
         // A run of what needs nothing done to it: up to a quote, a backslash,
         // a control or a byte past ASCII, handed over in one piece.
         const std::string_view left = in.rest();
-        std::size_t run = 1;
-        while (run != left.size()) {
-          const auto byte = static_cast<unsigned char>(left[run]);
-          if (byte < 0x20 || byte >= 0x80 || byte == '"' || byte == '\\') break;
-          ++run;
-        }
+        const std::size_t run = 1 + plain_run(left.substr(1));
         out.append(left.substr(0, run));
         in.skip(run);
       } else {

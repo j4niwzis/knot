@@ -86,6 +86,8 @@ std::pair<double, double> measure(Read read, int times) {
 
 int main() {
   const std::string long_body(2000, 'x');
+  std::string cyrillic;
+  for (int at = 0; at != 200; ++at) cyrillic += "\xd0\x9f\xd1\x80\xd0\xb8\xd0\xb2\xd0\xb5\xd1\x82 ";
   const std::vector<std::pair<std::string, std::string>> cases{
       {"message, type first",
        R"({"type":"m.room.message","content":{"msgtype":"m.text","body":"hello world, this is a message"},"event_id":"$abcdef"})"},
@@ -99,6 +101,12 @@ int main() {
        R"({"content":{},"event_id":"$abcdef","type":"m.room.message"})"},
       {"long body, type last",
        R"({"content":{"body":")" + long_body + R"(","msgtype":"m.text"},"event_id":"$abcdef","type":"m.room.message"})"},
+      {"cyrillic body, type last",
+       R"({"content":{"body":")" + cyrillic + R"(","msgtype":"m.text"},"event_id":"$abcdef","type":"m.room.message"})"},
+      {"pretty-printed, type last",
+       "{\n    \"content\": {\n        \"body\": \"hello world, this is a message\",\n"
+       "        \"msgtype\": \"m.text\"\n    },\n    \"event_id\": \"$abcdef\",\n"
+       "    \"type\": \"m.room.message\"\n}\n"},
       {"nested unknown, type last",
        R"({"content":{"body":"hi","msgtype":"m.text","m.relates_to":{"rel_type":"m.thread","event_id":"$x","m.in_reply_to":{"event_id":"$y"}},"extra":[1,2,3,{"a":[true,false,null]}]},"event_id":"$abcdef","type":"m.room.message"})"},
   };
