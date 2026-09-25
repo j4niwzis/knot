@@ -268,7 +268,7 @@ class object_frame final : public frame {
   template <std::size_t... Rank>
   static constexpr std::string_view key_of(std::size_t rank, std::index_sequence<Rank...>) {
     std::string_view found;
-    ((rank == Rank ? (found = key_literal<Type, Rank>.view(), true) : false) ||
+    (void)((rank == Rank ? (found = key_literal<Type, Rank>.view(), true) : false) ||
      ...);
     return found;
   }
@@ -279,7 +279,7 @@ class object_frame final : public frame {
   template <std::size_t... Rank>
   constexpr step member_of(std::size_t rank, std::index_sequence<Rank...>) const {
     step found;
-    ((rank == Rank
+    (void)((rank == Rank
           ? (found = child_step(boost::pfr::get<order_of<Type>[Rank]>(value_)), true)
           : false) ||
      ...);
