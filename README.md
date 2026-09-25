@@ -150,6 +150,14 @@ typing it:
 | body of 2400 bytes of Cyrillic | 398 | 1 | 704 | 8 |
 | pretty-printed | 181 | 1 | 329 | 8 |
 
+`test/bench/sync.cc` reads a /sync response of 0.3 MB -- 20 rooms, 1000
+events of five kinds written type last, with keys nobody here describes:
+
+| | MB/s | allocations an event |
+| --- | ---: | ---: |
+| typed, `knot::by` | 711 | 3.5 |
+| whole, as a `knot::value` | 428 | 14.2 |
+
 ## Building
 
 ```sh

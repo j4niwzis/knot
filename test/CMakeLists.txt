@@ -45,3 +45,5 @@ knot_tests(write knot)
 # Benchmarks: built with the tests, run by hand.
 add_executable(knot-bench-by bench/by.cc)
 target_link_libraries(knot-bench-by PRIVATE knot)
+add_executable(knot-bench-sync bench/sync.cc)
+target_link_libraries(knot-bench-sync PRIVATE knot)
