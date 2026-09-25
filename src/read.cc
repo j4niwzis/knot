@@ -886,6 +886,7 @@ template <bool Canonical, class Element, class Allocator, class Cursor>
 constexpr bool read_array(Cursor& in, std::vector<Element, Allocator>& out) {
   if (!in.expect('[', "knot: expected an array")) return false;
   out.clear();
+  if (in.peek() != ']') out.reserve(4);
   space<Canonical>(in);
   if (in.peek() == ']') {
     in.next();
@@ -1116,6 +1117,9 @@ constexpr bool read_flat_map(Cursor& in, Map& out) {
   typename Map::mapped_container_type values;
   space<Canonical>(in);
   if (in.peek() != '}') {
+    // Room for a few at once, rather than one, then two, then four.
+    keys.reserve(4);
+    values.reserve(4);
     for (;;) {
       const std::size_t at = in.offset();
       std::string& key = keys.emplace_back();
@@ -1139,7 +1143,10 @@ constexpr bool read_flat_map(Cursor& in, Map& out) {
     }
   }
   if (!in.expect('}', "knot: expected ',' or '}'")) return false;
-  if constexpr (!Canonical) {
+  // Ordinary JSON that happens to be sorted, as most producers write it, is
+  // handed over as it is too.
+  const bool sorted = std::ranges::adjacent_find(keys, std::ranges::greater_equal{}) == keys.end();
+  if (!Canonical && !sorted) {
     std::vector<std::size_t> order(keys.size());
     for (std::size_t at = 0; at != order.size(); ++at) order[at] = at;
     std::ranges::stable_sort(order, {}, [&](std::size_t at) -> const std::string& {
