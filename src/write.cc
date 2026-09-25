@@ -309,6 +309,9 @@ class object_frame final : public frame {
     return found;
   }
   constexpr bool present(std::size_t rank) const {
+    if constexpr (keeps_rest<Type>) {
+      if (order_of<Type>[rank] == schema_of<Type>.rest_member()) return false;
+    }
     return present_of(rank, std::make_index_sequence<schema<Type>::size>{});
   }
 
@@ -370,6 +373,13 @@ constexpr std::unique_ptr<frame> frame_for(const Type& value) {
     return std::make_unique<array_frame<typename Type::value_type,
                                         typename Type::allocator_type>>(value);
   } else if constexpr (described<Type>) {
+    if constexpr (keeps_rest<Type>) {
+      const auto& kept = boost::pfr::get<schema_of<Type>.rest_member()>(value);
+      if (!kept.is_null() &&
+          !(kept.template is<knot::value::object>() && kept.template as<knot::value::object>().empty())) {
+        return std::make_unique<owned_frame>(to_value(value));
+      }
+    }
     return std::make_unique<object_frame<Type>>(value);
   } else {
     static_assert(false, "knot: this type has no JSON form");
@@ -639,10 +649,21 @@ constexpr void put(std::string& out, const Type& value) {
     }
     out += '}';
   } else if constexpr (described<Type>) {
+    if constexpr (keeps_rest<Type>) {
+      const auto& kept = boost::pfr::get<schema_of<Type>.rest_member()>(value);
+      if (!kept.is_null() &&
+          !(kept.template is<knot::value::object>() && kept.template as<knot::value::object>().empty())) {
+        put(out, to_value(value));
+        return;
+      }
+    }
     out += '{';
     bool first = true;
     [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
       (([&] {
+         if constexpr (keeps_rest<Type>) {
+           if (order_of<Type>[Rank] == schema_of<Type>.rest_member()) return;
+         }
          const auto& member = boost::pfr::get<order_of<Type>[Rank]>(value);
          if constexpr (is_optional<std::remove_cvref_t<decltype(member)>>::value) {
            if (!member) return;

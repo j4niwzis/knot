@@ -37,6 +37,17 @@ struct name {
   }
 };
 
+// Where the keys a type does not have go, rather than being passed over: a
+// member of type knot::value, said with .member<"extra">(knot::rest).
+struct rest_t {
+  explicit rest_t() = default;
+};
+inline constexpr rest_t rest{};
+
+// What a member for the rest has for a key: no key at all -- it is not UTF-8,
+// so no key read can ever be it, and it sorts after every one that can.
+inline constexpr std::string_view rest_key = "\xff\xff";
+
 // The key a member is written under, where it is not the member's name.
 struct key {
   std::string_view text;
@@ -59,6 +70,18 @@ class schema {
     made.keys_[index_of(Field.view())] = said.text;
     return made;
   }
+
+  template <name Field>
+  [[nodiscard]] consteval schema member(rest_t) const {
+    schema made = *this;
+    made.rest_ = index_of(Field.view());
+    made.keys_[made.rest_] = rest_key;
+    return made;
+  }
+
+  // The member the rest of the keys go to, in declaration order; size where
+  // there is none.
+  [[nodiscard]] constexpr std::size_t rest_member() const { return rest_; }
 
   // What names this type where a knot::by chooses among several: the value of
   // the sibling key it is chosen by, "m.room.message" for a message.
@@ -85,6 +108,7 @@ class schema {
 
   std::array<std::string_view, size> keys_{};
   std::string_view tag_{};
+  std::size_t rest_ = size;
 };
 
 // A type that says what it is called in JSON.

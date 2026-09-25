@@ -1054,7 +1054,7 @@ constexpr bool read_object(Cursor& in, Type& out) {
   key_buffer<room> previous;
   std::string key_rest;
   std::string previous_rest;
-  if constexpr (Canonical) {
+  if constexpr (Canonical || keeps_rest<Type>) {
     key.rest = &key_rest;
     previous.rest = &previous_rest;
   }
@@ -1101,7 +1101,17 @@ constexpr bool read_object(Cursor& in, Type& out) {
       if (!in.expect(':', "knot: expected ':'")) return false;
       space<Canonical>(in);
       if (rank == size) {
-        if (!pass_over<Canonical>(in)) return false;
+        if constexpr (keeps_rest<Type>) {
+          auto& kept = boost::pfr::get<schema_of<Type>.rest_member()>(out);
+          if (!kept.template is<value::object>()) kept = value(value::object{});
+          auto& members = std::get<value::object>(kept.data());
+          const std::string_view text = Canonical ? previous.text() : key.text();
+          const auto [entry, made] = members.try_emplace(std::string(text));
+          if (!made) return in.fail_at("knot: a key twice", at);
+          if (!read_any<Canonical>(in, entry->second)) return false;
+        } else {
+          if (!pass_over<Canonical>(in)) return false;
+        }
       } else {
         if (seen[rank]) return in.fail_at("knot: a key twice", at);
         seen[rank] = true;
@@ -1361,6 +1371,8 @@ enum class went { fit, tree, failed };
 template <class Type>
 constexpr value to_tree(Type&& made);
 
+constexpr void lay(value& tree, value overlay);
+
 template <class Type>
 constexpr value object_to_tree(Type&& made, const bool* seen) {
   constexpr std::size_t size = schema<std::remove_cvref_t<Type>>::size;
@@ -1371,8 +1383,14 @@ constexpr value object_to_tree(Type&& made, const bool* seen) {
   value::object::mapped_container_type values;
   keys.reserve(size);
   values.reserve(size);
+  value kept;
   [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
     (([&] {
+       if constexpr (keeps_rest<plain> &&
+                     order_of<plain>[Rank] == schema_of<plain>.rest_member()) {
+         kept = std::move(boost::pfr::get<order_of<plain>[Rank]>(made));
+         return;
+       }
        if (seen && !seen[Rank]) return;
        auto& member = boost::pfr::get<order_of<plain>[Rank]>(made);
        using member_type = std::remove_cvref_t<decltype(member)>;
@@ -1387,7 +1405,9 @@ constexpr value object_to_tree(Type&& made, const bool* seen) {
      }()),
      ...);
   }(std::make_index_sequence<size>{});
-  return value(value::object(std::sorted_unique, std::move(keys), std::move(values)));
+  value tree(value::object(std::sorted_unique, std::move(keys), std::move(values)));
+  lay(tree, std::move(kept));
+  return tree;
 }
 
 template <class Type>
@@ -1457,6 +1477,9 @@ constexpr bool tree_fits(const value& tree) {
     return [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
       return (true && ... && [&] {
         using member_type = field_t<Type, order_of<Type>[Rank]>;
+        if constexpr (keeps_rest<Type>) {
+          if (order_of<Type>[Rank] == schema_of<Type>.rest_member()) return true;
+        }
         const auto found = members->find(key_text<Type, Rank>);
         if (found == members->end()) return is_optional<member_type>::value;
         return tree_fits<member_type>(found->second);
@@ -1478,6 +1501,9 @@ constexpr bool object_from_tree(value::object& members, Type& out) {
     return (true && ... && [&] {
       auto& member = boost::pfr::get<order_of<Type>[Rank]>(out);
       using member_type = std::remove_cvref_t<decltype(member)>;
+      if constexpr (keeps_rest<Type>) {
+        if (order_of<Type>[Rank] == schema_of<Type>.rest_member()) return true;
+      }
       const auto found = members.find(key_text<Type, Rank>);
       if (found == members.end()) {
         if constexpr (is_optional<member_type>::value) {
@@ -2354,6 +2380,15 @@ value as_tree(const By& content) {
       content.data());
   detail::lay(tree, content.unknown);
   return tree;
+}
+
+// A typed value as a tree -- the rest of its keys, where it keeps them, laid
+// back in.
+template <class Type>
+  requires described<std::remove_cvref_t<Type>>
+value to_value(const Type& made) {
+  auto copy = made;
+  return detail::to_tree(std::move(copy));
 }
 
 // A tree as a typed value, moved out of it; nothing, and the tree kept whole,
