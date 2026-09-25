@@ -110,6 +110,11 @@ class by {
 
   // Where reading stands, between the content and the tag; nothing of the
   // value itself.
+  // What the content had that the alternative held does not: its keys with
+  // their values, and for a member it does have, that member's own -- a tree
+  // shaped like the content, null where there is nothing.
+  value unknown;
+
   struct reading_state {
     std::size_t chosen = std::variant_npos;  // read into this by its tag
     bool in_tree = false;                    // the content went to the tree

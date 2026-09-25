@@ -25,6 +25,27 @@ consteval auto json_schema(knot::type<member>) {
   return knot::schema<member>().tag("m.room.member");
 }
 
+// A fuller message: what message has, and a relation.
+struct rich_message {
+  std::string msgtype;
+  std::string body;
+  std::optional<relates> relates_to;
+  friend bool operator==(const rich_message&, const rich_message&) = default;
+};
+consteval auto json_schema(knot::type<rich_message>) {
+  return knot::schema<rich_message>()
+      .member<"relates_to">(knot::key("m.relates_to"))
+      .tag("org.example.rich");
+}
+
+struct rich_event {
+  std::string type;
+  knot::by<"type", message, rich_message, knot::value> content;
+};
+consteval auto json_schema(knot::type<rich_event>) {
+  return knot::schema<rich_event>();
+}
+
 struct room_event {
   std::string type;
   knot::by<"type", message, member, knot::value> content;
@@ -146,6 +167,43 @@ TEST(ReadBy, NoFallback) {
       R"({"type":"org.example","content":{"membership":"leave"}})"));
   EXPECT_FALSE(knot::read<shapes::strict_event>(
       R"({"type":"m.room.member","content":{}})"));
+}
+
+TEST(ReadBy, KeptKeys) {
+  // Extra keys: still a message, the extras in unknown().
+  const auto got = knot::read<room_event>(
+      R"({"content":{"body":"hi","msgtype":"m.text","m.relates_to":{"rel_type":"m.thread","event_id":"$x"},"extra":[1]},"event_id":"$1","type":"m.room.message"})");
+  ASSERT_TRUE(got) << got.error().message;
+  ASSERT_TRUE(got->content.is<message>());
+  EXPECT_EQ(got->content.unknown["m.relates_to"]["rel_type"].as<std::string>(), "m.thread");
+  EXPECT_TRUE(got->content.unknown["extra"].is<knot::value::array>());
+  EXPECT_TRUE(got->content.unknown["body"].is_null());
+}
+
+TEST(ReadBy, AFullerTypeTakesTheKeptKeys) {
+  // Read as message (its first key is "body"); the tag then names the fuller
+  // type, which has m.relates_to: the kept value goes into it.
+  const auto got = knot::read<shapes::rich_event>(
+      R"({"content":{"body":"hi","m.relates_to":{"event_id":"$x","rel_type":"m.thread"},"msgtype":"m.text","other":true},"type":"org.example.rich"})");
+  ASSERT_TRUE(got) << got.error().message;
+  ASSERT_TRUE(got->content.is<shapes::rich_message>());
+  const auto& rich = got->content.as<shapes::rich_message>();
+  EXPECT_EQ(rich.body, "hi");
+  ASSERT_TRUE(rich.relates_to);
+  EXPECT_EQ(rich.relates_to->event_id, "$x");
+  EXPECT_TRUE(got->content.unknown["other"].as<bool>());
+  EXPECT_TRUE(got->content.unknown["m.relates_to"].is_null());
+}
+
+TEST(ReadBy, KeptKeysGoBackIntoTheTree) {
+  // A tag nobody names: the tree is the typed value and the kept keys, whole.
+  const auto got = knot::read<room_event>(
+      R"({"content":{"body":"hi","msgtype":"m.text","z":{"deep":[1,2]}},"event_id":"$1","type":"org.example"})");
+  ASSERT_TRUE(got) << got.error().message;
+  ASSERT_TRUE(got->content.is<knot::value>());
+  const knot::value& tree = got->content.as<knot::value>();
+  EXPECT_EQ(tree["body"].as<std::string>(), "hi");
+  EXPECT_EQ(tree["z"]["deep"].as<knot::value::array>().size(), 2u);
 }
 
 }  // namespace

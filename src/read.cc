@@ -1256,8 +1256,98 @@ constexpr bool rest_of_object(Cursor& in, value::object& members,
   }
 }
 
+// ---------------------------------------------------------------------------
+// Keys a type does not have, kept on the side.
+//
+// Where the reading may yet have to give the content back whole -- the
+// content of a knot::by, before its tag has decided -- a key the type does not
+// have does not end the typed reading: it is kept in an overlay, a tree shaped
+// like the content that holds only what the typed value does not. For a
+// member the type does have, the overlay holds that member's own overlay; for
+// an array, one for each element (null where an element has none). Typed
+// value and overlay together are the whole content.
+
+// The overlay laid into a tree: its keys added, its nested overlays laid into
+// the members they belong to.
+constexpr void lay(value& tree, value overlay) {
+  if (overlay.is_null()) return;
+  auto* into = std::get_if<value::object>(&tree.data());
+  auto* from = std::get_if<value::object>(&overlay.data());
+  if (into && from) {
+    for (auto&& [key, one] : *from) {
+      const auto found = into->find(key);
+      if (found == into->end()) {
+        into->emplace(std::string(key), std::move(one));
+      } else {
+        lay(found->second, std::move(one));
+      }
+    }
+    return;
+  }
+  auto* items = std::get_if<value::array>(&tree.data());
+  auto* overlays = std::get_if<value::array>(&overlay.data());
+  if (items && overlays) {
+    for (std::size_t at = 0; at < items->size() && at < overlays->size(); ++at) {
+      lay((*items)[at], std::move((*overlays)[at]));
+    }
+  }
+}
+
+// What of a tree a type does not have, as that type's overlay: null where
+// there is nothing.
+template <class Type>
+constexpr value left_over(const value& tree) {
+  const auto& held = tree.data();
+  if constexpr (is_optional<Type>::value) {
+    return tree.is_null() ? value() : left_over<typename Type::value_type>(tree);
+  } else if constexpr (is_vector<Type>::value) {
+    const auto* items = std::get_if<value::array>(&held);
+    if (!items) return value();
+    value::array overlays;
+    bool any = false;
+    for (const auto& one : *items) {
+      overlays.push_back(left_over<typename Type::value_type>(one));
+      any = any || !overlays.back().is_null();
+    }
+    return any ? value(std::move(overlays)) : value();
+  } else if constexpr (is_map<Type>::value) {
+    const auto* members = std::get_if<value::object>(&held);
+    if (!members) return value();
+    value::object overlay;
+    for (const auto& [key, one] : *members) {
+      value inner = left_over<typename Type::mapped_type>(one);
+      if (!inner.is_null()) overlay.emplace(std::string(key), std::move(inner));
+    }
+    return overlay.empty() ? value() : value(std::move(overlay));
+  } else if constexpr (described<Type>) {
+    const auto* members = std::get_if<value::object>(&held);
+    if (!members) return value();
+    value::object overlay;
+    for (const auto& [key, one] : *members) {
+      const std::size_t rank =
+          rank_of<Type>(key, std::make_index_sequence<schema<Type>::size>{});
+      if (rank == schema<Type>::size) {
+        overlay.emplace(std::string(key), one);
+        continue;
+      }
+      value inner = [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
+        value found;
+        (void)((rank == Rank
+                    ? (found = left_over<field_t<Type, order_of<Type>[Rank]>>(one), true)
+                    : false) ||
+               ...);
+        return found;
+      }(std::make_index_sequence<schema<Type>::size>{});
+      if (!inner.is_null()) overlay.emplace(std::string(key), std::move(inner));
+    }
+    return overlay.empty() ? value() : value(std::move(overlay));
+  } else {
+    return value();
+  }
+}
+
 template <bool Canonical, class Type, class Cursor>
-constexpr went read_or_tree(Cursor& in, Type& out, value& tree);
+constexpr went read_or_tree(Cursor& in, Type& out, value& tree, value* extras);
 
 // Anything that is not the kind of value expected: the whole of it a tree.
 template <bool Canonical, class Cursor>
@@ -1267,10 +1357,12 @@ constexpr went all_tree(Cursor& in, value& tree) {
 
 template <bool Canonical, class Element, class Allocator, class Cursor>
 constexpr went array_or_tree(Cursor& in, std::vector<Element, Allocator>& out,
-                             value& tree) {
+                             value& tree, value* extras) {
   if (in.peek() != '[') return all_tree<Canonical>(in, tree);
   in.next();
   out.clear();
+  value::array overlays;
+  bool any = false;
   space<Canonical>(in);
   if (in.peek() == ']') {
     in.next();
@@ -1278,33 +1370,43 @@ constexpr went array_or_tree(Cursor& in, std::vector<Element, Allocator>& out,
   }
   for (;;) {
     value turned;
-    const went element = read_or_tree<Canonical>(in, out.emplace_back(), turned);
+    value overlay;
+    const went element = read_or_tree<Canonical>(in, out.emplace_back(), turned,
+                                                 extras ? &overlay : nullptr);
     if (element == went::failed) return went::failed;
     if (element == went::tree) {
       out.pop_back();
       value::array items;
       items.reserve(out.size() + 1);
-      for (auto& one : out) items.push_back(to_tree(std::move(one)));
+      for (std::size_t at = 0; at != out.size(); ++at) {
+        items.push_back(to_tree(std::move(out[at])));
+        if (at < overlays.size()) lay(items.back(), std::move(overlays[at]));
+      }
       items.push_back(std::move(turned));
       if (!rest_of_array<Canonical>(in, items)) return went::failed;
       tree = value(std::move(items));
       return went::tree;
     }
+    any = any || !overlay.is_null();
+    overlays.push_back(std::move(overlay));
     space<Canonical>(in);
     if (in.peek() == ',') {
       in.next();
       space<Canonical>(in);
       continue;
     }
-    return in.expect(']', "knot: expected ',' or ']'") ? went::fit : went::failed;
+    if (!in.expect(']', "knot: expected ',' or ']'")) return went::failed;
+    if (extras && any) *extras = value(std::move(overlays));
+    return went::fit;
   }
 }
 
 template <bool Canonical, class Map, class Cursor>
-constexpr went map_or_tree(Cursor& in, Map& out, value& tree) {
+constexpr went map_or_tree(Cursor& in, Map& out, value& tree, value* extras) {
   if (in.peek() != '{') return all_tree<Canonical>(in, tree);
   in.next();
   out.clear();
+  value::object overlays;
   space<Canonical>(in);
   if (in.peek() == '}') {
     in.next();
@@ -1331,18 +1433,25 @@ constexpr went map_or_tree(Cursor& in, Map& out, value& tree) {
     }
     typename Map::mapped_type one{};
     value turned;
-    const went member = read_or_tree<Canonical>(in, one, turned);
+    value overlay;
+    const went member = read_or_tree<Canonical>(in, one, turned,
+                                                extras ? &overlay : nullptr);
     if (member == went::failed) return went::failed;
     if (member == went::tree) {
       value::object members;
       for (auto&& [had, held] : out) {
         members.emplace(std::string(had), to_tree(std::move(held)));
       }
-      members.emplace(key, std::move(turned));
-      if (!rest_of_object<Canonical>(in, members, previous)) return went::failed;
-      tree = value(std::move(members));
+      value made(std::move(members));
+      lay(made, value(std::move(overlays)));
+      std::get<value::object>(made.data()).emplace(key, std::move(turned));
+      if (!rest_of_object<Canonical>(in, std::get<value::object>(made.data()), previous)) {
+        return went::failed;
+      }
+      tree = std::move(made);
       return went::tree;
     }
+    if (!overlay.is_null()) overlays.emplace(key, std::move(overlay));
     out.emplace(std::move(key), std::move(one));
     space<Canonical>(in);
     if (in.peek() == ',') {
@@ -1350,14 +1459,18 @@ constexpr went map_or_tree(Cursor& in, Map& out, value& tree) {
       space<Canonical>(in);
       continue;
     }
-    return in.expect('}', "knot: expected ',' or '}'") ? went::fit : went::failed;
+    if (!in.expect('}', "knot: expected ',' or '}'")) return went::failed;
+    if (extras && !overlays.empty()) *extras = value(std::move(overlays));
+    return went::fit;
   }
 }
 
 // first_key: where the object's '{' and its first key were read already, to
-// choose the type by; the reading goes on from the ':' after it.
+// choose the type by; the reading goes on from the ':' after it. extras: where
+// the keys the type does not have are kept; without it such a key turns the
+// reading into a tree, since nothing else would keep it.
 template <bool Canonical, class Type, class Cursor>
-constexpr went object_or_tree(Cursor& in, Type& out, value& tree,
+constexpr went object_or_tree(Cursor& in, Type& out, value& tree, value* extras,
                               std::string* first_key = nullptr) {
   constexpr std::size_t size = schema<Type>::size;
   if (!first_key) {
@@ -1365,10 +1478,12 @@ constexpr went object_or_tree(Cursor& in, Type& out, value& tree,
     in.next();
   }
   std::array<bool, size> seen{};
-  // The members read so far and, from here on, the rest of the object: as a
-  // tree, with what was read moved into it.
+  value::object overlay;
+  // The members read so far, what was kept beside them and, from here on, the
+  // rest of the object: as a tree, with what was read moved into it.
   const auto turn = [&](std::string key, value turned, const std::string& previous) {
     value made = object_to_tree(std::move(out), seen.data());
+    lay(made, value(std::move(overlay)));
     auto& members = std::get<value::object>(made.data());
     members.emplace(std::move(key), std::move(turned));
     if (!rest_of_object<Canonical>(in, members, previous)) return went::failed;
@@ -1398,29 +1513,37 @@ constexpr went object_or_tree(Cursor& in, Type& out, value& tree,
       space<Canonical>(in);
       const std::size_t rank = rank_of<Type>(key, std::make_index_sequence<size>{});
       if (rank == size) {
-        // A key the type does not have: kept, so the rest is a tree.
+        value kept;
+        if (!read_any<Canonical>(in, kept)) return went::failed;
+        if (!extras) return turn(std::move(key), std::move(kept), previous);
+        const auto [entry, made] = overlay.try_emplace(std::move(key), std::move(kept));
+        if (!made) {
+          in.fail_at("knot: a key twice", at);
+          return went::failed;
+        }
+      } else {
+        if (seen[rank]) {
+          in.fail_at("knot: a key twice", at);
+          return went::failed;
+        }
         value turned;
-        if (!read_any<Canonical>(in, turned)) return went::failed;
-        return turn(std::move(key), std::move(turned), previous);
+        value inner;
+        const went member = [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
+          went result = went::failed;
+          (void)((rank == Rank
+                      ? (result = read_or_tree<Canonical>(
+                             in, boost::pfr::get<order_of<Type>[Rank]>(out), turned,
+                             extras ? &inner : nullptr),
+                         true)
+                      : false) ||
+                 ...);
+          return result;
+        }(std::make_index_sequence<size>{});
+        if (member == went::failed) return went::failed;
+        if (member == went::tree) return turn(std::move(key), std::move(turned), previous);
+        seen[rank] = true;
+        if (!inner.is_null()) overlay.emplace(std::move(key), std::move(inner));
       }
-      if (seen[rank]) {
-        in.fail_at("knot: a key twice", at);
-        return went::failed;
-      }
-      value turned;
-      const went member = [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
-        went result = went::failed;
-        (void)((rank == Rank
-                    ? (result = read_or_tree<Canonical>(
-                           in, boost::pfr::get<order_of<Type>[Rank]>(out), turned),
-                       true)
-                    : false) ||
-               ...);
-        return result;
-      }(std::make_index_sequence<size>{});
-      if (member == went::failed) return went::failed;
-      if (member == went::tree) return turn(std::move(key), std::move(turned), previous);
-      seen[rank] = true;
       space<Canonical>(in);
       if (in.peek() == ',') {
         in.next();
@@ -1435,14 +1558,16 @@ constexpr went object_or_tree(Cursor& in, Type& out, value& tree,
     if (!seen[rank] && required_at<Type>[rank]) {
       // Whole, but not this type: what was there, as a tree.
       tree = object_to_tree(std::move(out), seen.data());
+      lay(tree, value(std::move(overlay)));
       return went::tree;
     }
   }
+  if (extras && !overlay.empty()) *extras = value(std::move(overlay));
   return went::fit;
 }
 
 template <bool Canonical, class Type, class Cursor>
-constexpr went read_or_tree(Cursor& in, Type& out, value& tree) {
+constexpr went read_or_tree(Cursor& in, Type& out, value& tree, value* extras) {
   if constexpr (std::same_as<Type, value>) {
     return read_any<Canonical>(in, out) ? went::fit : went::failed;
   } else if constexpr (std::same_as<Type, std::string>) {
@@ -1467,15 +1592,15 @@ constexpr went read_or_tree(Cursor& in, Type& out, value& tree) {
   } else if constexpr (is_optional<Type>::value) {
     // null is kept by a tree and not by an optional: so it turns.
     if (in.peek() == 'n') return all_tree<Canonical>(in, tree);
-    return read_or_tree<Canonical>(in, out.emplace(), tree);
+    return read_or_tree<Canonical>(in, out.emplace(), tree, extras);
   } else if constexpr (is_vector<Type>::value) {
-    return array_or_tree<Canonical>(in, out, tree);
+    return array_or_tree<Canonical>(in, out, tree, extras);
   } else if constexpr (is_map<Type>::value) {
-    return map_or_tree<Canonical>(in, out, tree);
+    return map_or_tree<Canonical>(in, out, tree, extras);
   } else if constexpr (is_by<Type>::value) {
     return read_value<Canonical>(in, out) ? went::fit : went::failed;
   } else if constexpr (described<Type>) {
-    return object_or_tree<Canonical>(in, out, tree);
+    return object_or_tree<Canonical>(in, out, tree, extras);
   } else {
     static_assert(false, "knot: this type has no JSON form");
   }
@@ -1487,8 +1612,6 @@ constexpr went read_or_tree(Cursor& in, Type& out, value& tree) {
 // Which alternative a first key points to, where the tag has not come yet:
 // the first typed one that has such a key, or else the knot::value there is
 // for what no type has, or else the first.
-template <class By>
-constexpr std::size_t guessed_by_key(std::string_view key);
 template <name Tag, class... Alternatives>
 struct guess_of {
   static constexpr std::size_t by_key(std::string_view key) {
@@ -1518,13 +1641,15 @@ constexpr std::size_t guessed(const by<Tag, Alternatives...>*, std::string_view 
 }
 
 // The content into one alternative: the one the tag chose, if it came first;
-// otherwise the one its first key points to. Either turns into a tree where
-// it does not fit.
+// otherwise the one its first key points to. Keys it does not have are kept
+// beside it; it turns into a tree where it does not fit.
 template <bool Canonical, class By, class Cursor>
 constexpr bool read_by(Cursor& in, By& out) {
   using alternatives = by_alternatives<By>;
   auto& state = out.reading;
   state.in_tree = false;
+  state.tree = value();
+  out.unknown = value();
   std::size_t into = state.chosen;
   std::string first_key;
   bool have_key = false;
@@ -1555,30 +1680,25 @@ constexpr bool read_by(Cursor& in, By& out) {
                      value turned;
                      went made = went::failed;
                      if (!have_key) {
-                       made = read_or_tree<Canonical>(in, held, turned);
-                     } else if constexpr (std::same_as<held_type, value>) {
-                       // Read on as a tree from the first key.
-                       value::object members;
-                       space<Canonical>(in);
-                       if (!in.expect(':', "knot: expected ':'")) return false;
-                       space<Canonical>(in);
-                       auto& one = members[first_key];
-                       if (!read_any<Canonical>(in, one)) return false;
-                       if (!rest_of_object<Canonical>(in, members, first_key)) return false;
-                       held = value(std::move(members));
-                       made = went::fit;
+                       made = read_or_tree<Canonical>(in, held, turned, &out.unknown);
                      } else if constexpr (described<held_type>) {
-                       made = object_or_tree<Canonical>(in, held, turned, &first_key);
+                       made = object_or_tree<Canonical>(in, held, turned, &out.unknown,
+                                                        &first_key);
                      } else {
-                       // Not an object, though the text is: the whole a tree.
+                       // Read on as a tree from the first key.
                        value::object members;
                        space<Canonical>(in);
                        if (!in.expect(':', "knot: expected ':'")) return false;
                        space<Canonical>(in);
                        if (!read_any<Canonical>(in, members[first_key])) return false;
                        if (!rest_of_object<Canonical>(in, members, first_key)) return false;
-                       turned = value(std::move(members));
-                       made = went::tree;
+                       if constexpr (std::same_as<held_type, value>) {
+                         held = value(std::move(members));
+                         made = went::fit;
+                       } else {
+                         turned = value(std::move(members));
+                         made = went::tree;
+                       }
                      }
                      if (made == went::failed) return false;
                      if (made == went::tree) {
@@ -1594,9 +1714,12 @@ constexpr bool read_by(Cursor& in, By& out) {
   }(std::make_index_sequence<alternatives::count>{});
 }
 
-// Once the object is read: the content made the alternative its tag names --
-// moved over through a tree where it was read into another, or kept as the
-// tree where the named one does not fit it.
+// Once the object is read: the content made the alternative its tag names.
+// Read into that one, it stays, with what it did not have in unknown. Read
+// into another, or turned into a tree, it is made whole again as a tree --
+// typed value and kept keys together, by moves -- and the named one taken
+// from it, which keeps in unknown whatever it does not have; or, where the
+// named one does not fit, the tree stays, as knot::value.
 template <class By>
 constexpr bool settle_by(By& out, std::string_view tag) {
   using alternatives = by_alternatives<By>;
@@ -1605,10 +1728,14 @@ constexpr bool settle_by(By& out, std::string_view tag) {
   if (target == std::variant_npos) return false;
   const std::size_t read_into = out.data().index();
   if (!state.in_tree && read_into == target) return true;
-  value tree = state.in_tree
-                   ? std::move(state.tree)
-                   : std::visit([](auto& held) { return to_tree(std::move(held)); },
-                                out.data());
+  value tree;
+  if (state.in_tree) {
+    tree = std::move(state.tree);
+  } else {
+    tree = std::visit([](auto& held) { return to_tree(std::move(held)); }, out.data());
+    lay(tree, std::move(out.unknown));
+  }
+  out.unknown = value();
   state.in_tree = false;
   state.tree = value();
   const bool made = [&]<std::size_t... At>(std::index_sequence<At...>) {
@@ -1616,11 +1743,18 @@ constexpr bool settle_by(By& out, std::string_view tag) {
     (void)((target == At
                 ? (fits = [&] {
                      using typed_type = std::variant_alternative_t<At, typename By::variant>;
-                     if (!tree_fits<typed_type>(tree)) return false;
-                     typed_type typed{};
-                     if (!from_tree(tree, typed)) return false;
-                     out.data().template emplace<At>(std::move(typed));
-                     return true;
+                     if constexpr (std::same_as<typed_type, value>) {
+                       out.data().template emplace<At>(std::move(tree));
+                       return true;
+                     } else {
+                       if (!tree_fits<typed_type>(tree)) return false;
+                       value rest = left_over<typed_type>(tree);
+                       typed_type typed{};
+                       if (!from_tree(tree, typed)) return false;
+                       out.data().template emplace<At>(std::move(typed));
+                       out.unknown = std::move(rest);
+                       return true;
+                     }
                    }(),
                    true)
                 : false) ||
@@ -1634,7 +1768,6 @@ constexpr bool settle_by(By& out, std::string_view tag) {
   }
   return false;
 }
-
 
 template <bool Canonical, class Type, class Cursor>
 constexpr bool read_value(Cursor& in, Type& out) {
