@@ -154,6 +154,49 @@ class array_frame final : public frame {
   bool comma_ = false;
 };
 
+// An object whose keys are the data, in the map's order -- which for a map
+// from strings is the order of their bytes, Canonical JSON's.
+template <class Map>
+class map_frame final : public frame {
+ public:
+  constexpr explicit map_frame(const Map& values)
+      : values_(values), at_(values.begin()) {}
+
+  constexpr step next() override {
+    if (!opened_) {
+      opened_ = true;
+      return step::piece("{");
+    }
+    if (at_ == values_.end()) {
+      if (closed_) return step::done();
+      closed_ = true;
+      return step::piece("}");
+    }
+    // Each entry: a comma after the first, the key, a colon, the value.
+    if (stage_ == 0) {
+      stage_ = 1;
+      if (at_ != values_.begin()) return step::piece(",");
+    }
+    if (stage_ == 1) {
+      stage_ = 2;
+      return step::into(std::make_unique<string_frame>(at_->first));
+    }
+    if (stage_ == 2) {
+      stage_ = 3;
+      return step::piece(":");
+    }
+    stage_ = 0;
+    return step::into(frame_for((at_++)->second));
+  }
+
+ private:
+  const Map& values_;
+  typename Map::const_iterator at_;
+  int stage_ = 0;
+  bool opened_ = false;
+  bool closed_ = false;
+};
+
 // An object: each key in its order with what is around it, then its value.
 template <class Type>
 class object_frame final : public frame {
@@ -258,6 +301,8 @@ constexpr std::unique_ptr<frame> frame_for(const Type& value) {
   } else if constexpr (is_optional<Type>::value) {
     // Only asked of one that holds something.
     return frame_for(*value);
+  } else if constexpr (is_map<Type>::value) {
+    return std::make_unique<map_frame<Type>>(value);
   } else if constexpr (is_vector<Type>::value) {
     return std::make_unique<array_frame<typename Type::value_type,
                                         typename Type::allocator_type>>(value);

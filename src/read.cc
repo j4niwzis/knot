@@ -686,6 +686,44 @@ constexpr bool read_object(Cursor& in, Type& out) {
   return true;
 }
 
+// An object whose keys are the data: each key read whole, a key twice
+// refused, and in Canonical JSON the keys sorted.
+template <bool Canonical, class Map, class Cursor>
+constexpr bool read_map(Cursor& in, Map& out) {
+  if (!in.expect('{', "knot: expected an object")) return false;
+  out.clear();
+  space<Canonical>(in);
+  if (in.peek() == '}') {
+    in.next();
+    return true;
+  }
+  std::string key;
+  std::string_view previous;
+  for (;;) {
+    const std::size_t at = in.offset();
+    if (!read_string<Canonical>(in, key)) return false;
+    if constexpr (Canonical) {
+      if (!out.empty() && !(previous < key)) {
+        return in.fail_at("knot: keys out of order", at);
+      }
+    }
+    space<Canonical>(in);
+    if (!in.expect(':', "knot: expected ':'")) return false;
+    space<Canonical>(in);
+    const auto [entry, made] = out.try_emplace(std::move(key));
+    if (!made) return in.fail_at("knot: a key twice", at);
+    previous = entry->first;
+    if (!read_value<Canonical>(in, entry->second)) return false;
+    space<Canonical>(in);
+    if (in.peek() == ',') {
+      in.next();
+      space<Canonical>(in);
+      continue;
+    }
+    return in.expect('}', "knot: expected ',' or '}'");
+  }
+}
+
 template <bool Canonical, class Type, class Cursor>
 constexpr bool read_value(Cursor& in, Type& out) {
   if constexpr (std::same_as<Type, std::string>) {
@@ -708,6 +746,8 @@ constexpr bool read_value(Cursor& in, Type& out) {
     return read_value<Canonical>(in, out.emplace());
   } else if constexpr (is_vector<Type>::value) {
     return read_array<Canonical>(in, out);
+  } else if constexpr (is_map<Type>::value) {
+    return read_map<Canonical>(in, out);
   } else if constexpr (described<Type>) {
     return read_object<Canonical>(in, out);
   } else {

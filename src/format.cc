@@ -80,6 +80,17 @@ struct is_vector : std::false_type {};
 template <class Element, class Allocator>
 struct is_vector<std::vector<Element, Allocator>> : std::true_type {};
 
+// An object with keys of its own: a std::map from strings, which keeps them
+// in the order Canonical JSON writes them.
+template <class Type>
+struct is_map : std::false_type {};
+template <class Value, class Allocator>
+struct is_map<std::map<std::string, Value, std::less<std::string>, Allocator>>
+    : std::true_type {};
+template <class Value, class Allocator>
+struct is_map<std::map<std::string, Value, std::less<>, Allocator>>
+    : std::true_type {};
+
 template <class Type>
 struct is_optional : std::false_type {};
 template <class Value>
