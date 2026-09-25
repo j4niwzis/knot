@@ -169,6 +169,25 @@ events of five kinds written type last, with keys nobody here describes:
 | written, `knot::to_json_string` | 1071 | 2.8 |
 | written, `knot::to_json` gathered | 196 | 16.1 |
 
+## Testing
+
+Besides a test a case, two tests made up at random:
+
+- `read/random_documents`: 20000 documents with nesting, text of every kind,
+  escapes chosen at random among those that say the same and keys shuffled,
+  read back and compared with what was made, written as Canonical JSON and
+  read back strictly, then broken a byte at a time -- which may fail to read
+  and must do nothing worse;
+- `read/by_against_the_tree`: 20000 events with tags known and unknown and
+  content of every shape, read through `knot::by` and read as a tree typed
+  afterwards, which must agree and write the same Canonical JSON; read from
+  pieces a character at a time, and as Canonical JSON strictly, as well.
+
+Both run clean under AddressSanitizer and UndefinedBehaviorSanitizer.
+
+One thing a typed value does not keep: `null` for an optional member reads as
+empty, and is written as no key at all.
+
 ## Building
 
 ```sh
