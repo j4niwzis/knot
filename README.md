@@ -150,24 +150,26 @@ typing it:
 
 | case | knot::by | allocs | tree, then type | allocs |
 | --- | ---: | ---: | ---: | ---: |
-| message, type first | 163 | 1 | 274 | 8 |
-| message, type last | 171 | 1 | 298 | 8 |
-| member, type last | 152 | 0 | 296 | 7 |
-| unknown type | 262 | 5 | 217 | 8 |
-| body of 2000 ASCII bytes | 229 | 1 | 377 | 8 |
-| body of 2400 bytes of Cyrillic | 398 | 1 | 704 | 8 |
-| pretty-printed | 181 | 1 | 329 | 8 |
+| message, type first | 159 | 1 | 244 | 6 |
+| message, type last | 149 | 1 | 176 | 3 |
+| member, type last | 134 | 0 | 178 | 2 |
+| unknown type | 202 | 3 | 162 | 3 |
+| redacted `{}` | 102 | 0 | 82 | 0 |
+| body of 2000 ASCII bytes | 219 | 1 | 268 | 3 |
+| body of 2400 bytes of Cyrillic | 420 | 1 | 484 | 3 |
+| pretty-printed | 173 | 1 | 211 | 3 |
+| extra keys, nested | 655 | 15 | 643 | 16 |
 
 `test/bench/sync.cc` reads a /sync response of 0.3 MB -- 20 rooms, 1000
 events of five kinds written type last, with keys nobody here describes:
 
 | | MB/s | allocations an event |
 | --- | ---: | ---: |
-| read typed, `knot::by` | 637 | 3.5 |
-| read typed, Canonical JSON | 745 | 3.5 |
-| read whole, as a `knot::value` | 437 | 14.2 |
-| written, `knot::to_json_string` | 1071 | 2.8 |
-| written, `knot::to_json` gathered | 196 | 16.1 |
+| read typed, `knot::by` | 682 | 3.5 |
+| read typed, Canonical JSON | 796 | 3.5 |
+| read whole, as a `knot::value` | 400 | 14.2 |
+| written, `knot::to_json_string` | 1001 | 2.8 |
+| written, `knot::to_json` gathered | 236 | 7.7 |
 
 ## Testing
 
