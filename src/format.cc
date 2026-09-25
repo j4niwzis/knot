@@ -223,6 +223,16 @@ inline constexpr auto array_groups = freeze<[] {
   return out;
 }>();
 
+// The key of a member as it is written, with what comes before it and the
+// colon after: {"content": for the first, ,"depth": for the rest.
+template <class Type, std::size_t Rank>
+inline constexpr auto key_literal = freeze<[] {
+  std::string out = Rank == 0 ? "{" : ",";
+  append_json_string(out, schema_of<Type>.key_of(order_of<Type>[Rank]));
+  out += ':';
+  return out;
+}>();
+
 }  // namespace detail
 
 template <described Type>

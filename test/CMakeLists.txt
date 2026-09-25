@@ -3,6 +3,7 @@
 # One executable a test case, so that a case compiles only what it uses:
 #   format/  what the generator writes, as text
 #   read/    documents read, and every way of not being canonical refused
+#   write/   values written, and read back
 #   scan/    scan alone, on formats of the kind knot.format writes; off unless
 #            KNOT_SCAN_DIR says where a checkout of scan is
 cme_declare_port(NAME googletest-modules PROVIDES GTest
@@ -39,3 +40,4 @@ if(KNOT_SCAN_DIR)
   knot_tests(scan scan::scan)
 endif()
 knot_tests(read knot)
+knot_tests(write knot)
