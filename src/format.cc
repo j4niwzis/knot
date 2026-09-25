@@ -264,13 +264,19 @@ inline constexpr auto key_literal = freeze<[] {
   return out;
 }>();
 
-// Whether the member of each rank has to be there: all but the optional ones.
+// Whether the member of each rank has to be there: all but the optional ones,
+// and the one the rest of the keys go to.
 template <class Type>
 inline constexpr auto required_at = []<std::size_t... Rank>(
                                         std::index_sequence<Rank...>) {
   return std::array<bool, sizeof...(Rank)>{
-      !is_optional<field_t<Type, order_of<Type>[Rank]>>::value...};
+      (!is_optional<field_t<Type, order_of<Type>[Rank]>>::value &&
+       order_of<Type>[Rank] != schema_of<Type>.rest_member())...};
 }(std::make_index_sequence<schema<Type>::size>{});
+
+// Whether a type keeps the rest of its keys, and where.
+template <class Type>
+inline constexpr bool keeps_rest = schema_of<Type>.rest_member() != schema<Type>::size;
 
 }  // namespace detail
 
