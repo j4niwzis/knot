@@ -141,6 +141,15 @@ TEST(ReadRandom, MadeUpDocuments) {
     ASSERT_TRUE(got) << got.error().message << " at " << got.error().offset << " in " << text;
     ASSERT_TRUE(got->any == original) << text;
 
+    // The same from pieces, a character at a time.
+    if (round % 5 == 0) {
+      std::vector<std::string> pieces;
+      for (std::size_t at = 0; at < text.size(); at += 3) pieces.push_back(text.substr(at, 3));
+      const auto piecewise = knot::read<holder>(pieces | std::views::join);
+      ASSERT_TRUE(piecewise) << text;
+      ASSERT_TRUE(piecewise->any == original) << text;
+    }
+
     // Canonical, where it holds nothing Canonical JSON cannot say.
     const std::string canonical = knot::to_json_string(*got);
     const bool has_fraction = canonical.find('.') != std::string::npos;
