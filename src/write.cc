@@ -495,3 +495,133 @@ constexpr json_view<std::remove_cvref_t<Type>> to_json(Type&& value) {
 }
 
 }  // namespace knot
+
+namespace knot::detail::eager {
+
+// What a byte that needs escaping is written as.
+constexpr std::string_view escape_of(char letter, std::array<char, 6>& room) {
+  switch (letter) {
+    case '"': return "\\\"";
+    case '\\': return "\\\\";
+    case '\b': return "\\b";
+    case '\f': return "\\f";
+    case '\n': return "\\n";
+    case '\r': return "\\r";
+    case '\t': return "\\t";
+    default: {
+      constexpr std::string_view digits = "0123456789abcdef";
+      const auto byte = static_cast<unsigned char>(letter);
+      room = {'\\', 'u', '0', '0', digits[byte >> 4], digits[byte & 0xf]};
+      return {room.data(), room.size()};
+    }
+  }
+}
+
+constexpr void put_string(std::string& out, std::string_view text) {
+  out += '"';
+  while (!text.empty()) {
+    const std::size_t run = string_run(text);
+    out.append(text.substr(0, run));
+    text.remove_prefix(run);
+    if (!text.empty()) {
+      std::array<char, 6> room{};
+      out.append(escape_of(text.front(), room));
+      text.remove_prefix(1);
+    }
+  }
+  out += '"';
+}
+
+template <class Type>
+constexpr void put(std::string& out, const Type& value);
+
+template <class Number>
+constexpr void put_number(std::string& out, Number number) {
+  std::array<char, 32> digits{};
+  const auto made = std::to_chars(digits.data(), digits.data() + digits.size(), number);
+  out.append(digits.data(), made.ptr);
+}
+
+template <class Type>
+constexpr void put(std::string& out, const Type& value) {
+  if constexpr (requires { value.reading; value.data(); }) {
+    if (!value.unknown.is_null()) {
+      put(out, as_tree(value));
+    } else {
+      std::visit([&](const auto& held) { put(out, held); }, value.data());
+    }
+  } else if constexpr (std::same_as<Type, knot::value>) {
+    std::visit([&](const auto& held) { put(out, held); }, value.data());
+  } else if constexpr (std::same_as<Type, std::nullptr_t>) {
+    out += "null";
+  } else if constexpr (std::same_as<Type, bool>) {
+    out += value ? "true" : "false";
+  } else if constexpr (std::same_as<Type, double> || json_integer<Type>) {
+    put_number(out, value);
+  } else if constexpr (std::same_as<Type, std::string>) {
+    put_string(out, value);
+  } else if constexpr (is_optional<Type>::value) {
+    put(out, *value);
+  } else if constexpr (is_vector<Type>::value) {
+    out += '[';
+    bool first = true;
+    for (const auto& one : value) {
+      if (!first) out += ',';
+      first = false;
+      put(out, one);
+    }
+    out += ']';
+  } else if constexpr (is_map<Type>::value) {
+    out += '{';
+    bool first = true;
+    for (const auto& [key, one] : value) {
+      if (!first) out += ',';
+      first = false;
+      put_string(out, key);
+      out += ':';
+      put(out, one);
+    }
+    out += '}';
+  } else if constexpr (described<Type>) {
+    out += '{';
+    bool first = true;
+    [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
+      (([&] {
+         const auto& member = boost::pfr::get<order_of<Type>[Rank]>(value);
+         if constexpr (is_optional<std::remove_cvref_t<decltype(member)>>::value) {
+           if (!member) return;
+         }
+         if (!first) out += ',';
+         first = false;
+         out.append(key_literal<Type, Rank>.view());
+         put(out, member);
+       }()),
+       ...);
+    }(std::make_index_sequence<schema<Type>::size>{});
+    out += '}';
+  } else {
+    static_assert(false, "knot: this type has no JSON form");
+  }
+}
+
+}  // namespace knot::detail::eager
+
+export namespace knot {
+
+// A value as Canonical JSON, added to the end of a string at once: no view
+// and no pieces, for where the whole is wanted anyway.
+template <class Type>
+  requires described<std::remove_cvref_t<Type>>
+constexpr void write(std::string& out, const Type& value) {
+  detail::eager::put(out, value);
+}
+
+template <class Type>
+  requires described<std::remove_cvref_t<Type>>
+constexpr std::string to_json_string(const Type& value) {
+  std::string out;
+  write(out, value);
+  return out;
+}
+
+}  // namespace knot

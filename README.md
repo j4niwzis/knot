@@ -126,6 +126,14 @@ A lazy view of the document's characters, made as they are pulled, in
 Canonical JSON: keys sorted, only the escapes it must have, absent optionals
 left out. The pieces point into the value where they can.
 
+Where the whole is wanted at once, the eager writer is several times faster --
+no view, no pieces, the string appended to directly:
+
+```cpp
+std::string text = knot::to_json_string(value);
+knot::write(text, value);  // appended to what is there
+```
+
 Reading and writing are both `constexpr`: a document is written and read back
 inside a `static_assert` in the tests.
 
@@ -155,8 +163,11 @@ events of five kinds written type last, with keys nobody here describes:
 
 | | MB/s | allocations an event |
 | --- | ---: | ---: |
-| typed, `knot::by` | 711 | 3.5 |
-| whole, as a `knot::value` | 428 | 14.2 |
+| read typed, `knot::by` | 637 | 3.5 |
+| read typed, Canonical JSON | 745 | 3.5 |
+| read whole, as a `knot::value` | 437 | 14.2 |
+| written, `knot::to_json_string` | 1071 | 2.8 |
+| written, `knot::to_json` gathered | 196 | 16.1 |
 
 ## Building
 

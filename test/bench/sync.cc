@@ -185,6 +185,28 @@ int main() {
       }
     }
   });
+  // The same response as Canonical JSON, written by knot, read back strictly.
+  const std::string canonical = [&] {
+    auto got = knot::read<matrix_sync::response>(text);
+    return knot::to_json(*got) | std::ranges::to<std::string>();
+  }();
+  const auto strict = measure([&] {
+    auto got = knot::read<matrix_sync::response>(canonical, knot::canonical);
+    if (!got) {
+      std::println("{} at {}", got.error().message, got.error().offset);
+      std::abort();
+    }
+  });
+  // Writing it: the lazy view, gathered into a string.
+  const auto typed_response = *knot::read<matrix_sync::response>(text);
+  const auto written = measure([&] {
+    auto out = knot::to_json(typed_response) | std::ranges::to<std::string>();
+    if (out.size() != canonical.size()) std::abort();
+  });
+  const auto eager = measure([&] {
+    const std::string out = knot::to_json_string(typed_response);
+    if (out.size() != canonical.size()) std::abort();
+  });
   const auto tree = measure([&] {
     auto got = knot::read<matrix_sync::whole>(text);
     if (!got) std::abort();
@@ -193,6 +215,12 @@ int main() {
   std::println("{:<22} {:>10} {:>14}", "", "MB/s", "allocs/event");
   std::println("{:<22} {:>10.0f} {:>14.1f}", "knot::by, typed", megabytes / by.first,
                double(by.second) / 1000);
+  std::println("{:<22} {:>10.0f} {:>14.1f}", "knot::by, canonical",
+               double(canonical.size()) / 1e6 / strict.first, double(strict.second) / 1000);
+  std::println("{:<22} {:>10.0f} {:>14.1f}", "to_json_string",
+               double(canonical.size()) / 1e6 / eager.first, double(eager.second) / 1000);
+  std::println("{:<22} {:>10.0f} {:>14.1f}", "to_json, written",
+               double(canonical.size()) / 1e6 / written.first, double(written.second) / 1000);
   std::println("{:<22} {:>10.0f} {:>14.1f}", "knot::value, whole", megabytes / tree.first,
                double(tree.second) / 1000);
 }

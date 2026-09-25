@@ -109,6 +109,11 @@ class cursor {
   int depth = 0;
 };
 
+}  // namespace knot::detail
+
+// Exported for knot.write, which finds runs the same way.
+export namespace knot::detail {
+
 // ---------------------------------------------------------------------------
 // Runs found 32 bytes at a time, where the text is in memory.
 //
@@ -381,6 +386,10 @@ inline bool has_ssse3() {
   while (done != text.size() && space_byte(static_cast<unsigned char>(text[done]))) ++done;
   return done;
 }
+
+}  // namespace knot::detail
+
+namespace knot::detail {
 
 // White space, where ordinary JSON allows it.
 template <bool Canonical, class Cursor>
