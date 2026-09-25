@@ -617,6 +617,11 @@ constexpr bool read_object(Cursor& in, Type& out) {
       std::size_t rank = size;
       if constexpr (Canonical) {
         const std::string_view text = key.text();
+        // An optional key that sorts before this one is absent.
+        while (next != size && !required_at<Type>[next] &&
+               schema_of<Type>.key_of(order_of<Type>[next]) < text) {
+          ++next;
+        }
         const std::string_view expected =
             next != size ? schema_of<Type>.key_of(order_of<Type>[next])
                          : std::string_view();
@@ -674,7 +679,9 @@ constexpr bool read_object(Cursor& in, Type& out) {
   const std::size_t end = in.offset();
   if (!in.expect('}', "knot: expected ',' or '}'")) return false;
   for (std::size_t rank = 0; rank != size; ++rank) {
-    if (!seen[rank]) return in.fail_at("knot: a key is missing", end);
+    if (!seen[rank] && required_at<Type>[rank]) {
+      return in.fail_at("knot: a key is missing", end);
+    }
   }
   return true;
 }
@@ -692,6 +699,13 @@ constexpr bool read_value(Cursor& in, Type& out) {
     return in.literal("false", "knot: expected true or false");
   } else if constexpr (json_integer<Type>) {
     return read_integer<Canonical>(in, out);
+  } else if constexpr (is_optional<Type>::value) {
+    // Present, or null: which is what absent is written as by some.
+    if (in.peek() == 'n') {
+      out.reset();
+      return in.literal("null", "knot: not a value");
+    }
+    return read_value<Canonical>(in, out.emplace());
   } else if constexpr (is_vector<Type>::value) {
     return read_array<Canonical>(in, out);
   } else if constexpr (described<Type>) {

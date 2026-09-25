@@ -12,10 +12,10 @@ TEST(Write, PiecesPointIntoTheValue) {
   auto view = knot::to_json(one);
   std::vector<std::string_view> pieces;
   for (const std::string_view piece : view.chunks()) pieces.push_back(piece);
-  // {"content":  "  the thousand x in one piece  "  ,"depth":  1  ,"prev":  [  ]  }
-  ASSERT_EQ(pieces.size(), 10u);
-  EXPECT_EQ(pieces[2].size(), 1000u);
-  EXPECT_EQ(pieces[2].data(), one.content.data());
+  // {  "content":  "  the thousand x  "  ,  "depth":  1  ,  "prev":  [  ]  }
+  ASSERT_EQ(pieces.size(), 13u);
+  EXPECT_EQ(pieces[3].size(), 1000u);
+  EXPECT_EQ(pieces[3].data(), one.content.data());
 }
 
 }  // namespace

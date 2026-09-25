@@ -80,6 +80,11 @@ struct is_vector : std::false_type {};
 template <class Element, class Allocator>
 struct is_vector<std::vector<Element, Allocator>> : std::true_type {};
 
+template <class Type>
+struct is_optional : std::false_type {};
+template <class Value>
+struct is_optional<std::optional<Value>> : std::true_type {};
+
 template <class Type, std::size_t Index>
 using field_t = std::remove_cvref_t<boost::pfr::tuple_element_t<Index, Type>>;
 
@@ -223,15 +228,22 @@ inline constexpr auto array_groups = freeze<[] {
   return out;
 }>();
 
-// The key of a member as it is written, with what comes before it and the
-// colon after: {"content": for the first, ,"depth": for the rest.
+// The key of a member as it is written, quotes, colon and all: "content":
 template <class Type, std::size_t Rank>
 inline constexpr auto key_literal = freeze<[] {
-  std::string out = Rank == 0 ? "{" : ",";
+  std::string out;
   append_json_string(out, schema_of<Type>.key_of(order_of<Type>[Rank]));
   out += ':';
   return out;
 }>();
+
+// Whether the member of each rank has to be there: all but the optional ones.
+template <class Type>
+inline constexpr auto required_at = []<std::size_t... Rank>(
+                                        std::index_sequence<Rank...>) {
+  return std::array<bool, sizeof...(Rank)>{
+      !is_optional<field_t<Type, order_of<Type>[Rank]>>::value...};
+}(std::make_index_sequence<schema<Type>::size>{});
 
 }  // namespace detail
 

@@ -162,17 +162,28 @@ class object_frame final : public frame {
 
   constexpr step next() override {
     constexpr std::size_t size = schema<Type>::size;
-    if (at_ == size) {
-      if (closed_) return step::done();
-      closed_ = true;
-      if constexpr (size == 0) return step::piece("{}");
-      return step::piece("}");
+    if (!opened_) {
+      opened_ = true;
+      return step::piece("{");
     }
     if (!keyed_) {
+      // An empty optional is no key at all.
+      while (at_ != size && !present(at_)) ++at_;
+      if (at_ == size) {
+        if (closed_) return step::done();
+        closed_ = true;
+        return step::piece("}");
+      }
+      if (written_ != 0 && !comma_) {
+        comma_ = true;
+        return step::piece(",");
+      }
+      comma_ = false;
       keyed_ = true;
       return step::piece(key(at_));
     }
     keyed_ = false;
+    ++written_;
     return step::into(member(at_++));
   }
 
@@ -203,9 +214,35 @@ class object_frame final : public frame {
     return member_of(rank, std::make_index_sequence<schema<Type>::size>{});
   }
 
+  template <std::size_t... Rank>
+  constexpr bool present_of(std::size_t rank, std::index_sequence<Rank...>) const {
+    bool found = true;
+    (void)((rank == Rank
+                ? (found = [&] {
+                     const auto& held =
+                         boost::pfr::get<order_of<Type>[Rank]>(value_);
+                     if constexpr (is_optional<
+                                       std::remove_cvref_t<decltype(held)>>::value) {
+                       return held.has_value();
+                     } else {
+                       return true;
+                     }
+                   }(),
+                   true)
+                : false) ||
+           ...);
+    return found;
+  }
+  constexpr bool present(std::size_t rank) const {
+    return present_of(rank, std::make_index_sequence<schema<Type>::size>{});
+  }
+
   const Type& value_;
   std::size_t at_ = 0;
+  std::size_t written_ = 0;
+  bool opened_ = false;
   bool keyed_ = false;
+  bool comma_ = false;
   bool closed_ = false;
 };
 
@@ -218,6 +255,9 @@ constexpr std::unique_ptr<frame> frame_for(const Type& value) {
                                                : std::string_view("false"));
   } else if constexpr (json_integer<Type>) {
     return std::make_unique<piece_frame>(value);
+  } else if constexpr (is_optional<Type>::value) {
+    // Only asked of one that holds something.
+    return frame_for(*value);
   } else if constexpr (is_vector<Type>::value) {
     return std::make_unique<array_frame<typename Type::value_type,
                                         typename Type::allocator_type>>(value);
