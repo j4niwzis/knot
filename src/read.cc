@@ -122,40 +122,41 @@ constexpr int four_hex(Cursor& in) {
   return value;
 }
 
-constexpr void append_utf8(std::string& out, std::uint32_t point) {
+template <class Sink>
+constexpr void append_utf8(Sink& out, std::uint32_t point) {
   if (point < 0x80) {
-    out += static_cast<char>(point);
+    out(static_cast<char>(point));
   } else if (point < 0x800) {
-    out += static_cast<char>(0xc0 | (point >> 6));
-    out += static_cast<char>(0x80 | (point & 0x3f));
+    out(static_cast<char>(0xc0 | (point >> 6)));
+    out(static_cast<char>(0x80 | (point & 0x3f)));
   } else if (point < 0x10000) {
-    out += static_cast<char>(0xe0 | (point >> 12));
-    out += static_cast<char>(0x80 | ((point >> 6) & 0x3f));
-    out += static_cast<char>(0x80 | (point & 0x3f));
+    out(static_cast<char>(0xe0 | (point >> 12)));
+    out(static_cast<char>(0x80 | ((point >> 6) & 0x3f)));
+    out(static_cast<char>(0x80 | (point & 0x3f)));
   } else {
-    out += static_cast<char>(0xf0 | (point >> 18));
-    out += static_cast<char>(0x80 | ((point >> 12) & 0x3f));
-    out += static_cast<char>(0x80 | ((point >> 6) & 0x3f));
-    out += static_cast<char>(0x80 | (point & 0x3f));
+    out(static_cast<char>(0xf0 | (point >> 18)));
+    out(static_cast<char>(0x80 | ((point >> 12) & 0x3f)));
+    out(static_cast<char>(0x80 | ((point >> 6) & 0x3f)));
+    out(static_cast<char>(0x80 | (point & 0x3f)));
   }
 }
 
 // What follows a backslash in ordinary JSON: any escape there is, a \u that
 // names a surrogate taken with its pair.
-template <class Cursor>
-constexpr bool ordinary_escape(Cursor& in, std::string& out) {
+template <class Cursor, class Sink>
+constexpr bool ordinary_escape(Cursor& in, Sink& out) {
   constexpr std::string_view bad = "knot: not an escape";
   constexpr std::string_view lone = "knot: half of a surrogate pair";
   const int escaped = in.peek();
   switch (escaped) {
-    case '"': out += '"'; break;
-    case '\\': out += '\\'; break;
-    case '/': out += '/'; break;
-    case 'b': out += '\b'; break;
-    case 'f': out += '\f'; break;
-    case 'n': out += '\n'; break;
-    case 'r': out += '\r'; break;
-    case 't': out += '\t'; break;
+    case '"': out('"'); break;
+    case '\\': out('\\'); break;
+    case '/': out('/'); break;
+    case 'b': out('\b'); break;
+    case 'f': out('\f'); break;
+    case 'n': out('\n'); break;
+    case 'r': out('\r'); break;
+    case 't': out('\t'); break;
     case 'u': {
       const std::size_t start = in.offset() - 1;
       in.next();
@@ -182,18 +183,18 @@ constexpr bool ordinary_escape(Cursor& in, std::string& out) {
 
 // What follows a backslash in Canonical JSON: the short forms, and \u00xx in
 // lower case only for a control that has none.
-template <class Cursor>
-constexpr bool canonical_escape(Cursor& in, std::string& out) {
+template <class Cursor, class Sink>
+constexpr bool canonical_escape(Cursor& in, Sink& out) {
   constexpr std::string_view bad = "knot: an escape Canonical JSON does not write";
   const int escaped = in.peek();
   switch (escaped) {
-    case '"': out += '"'; break;
-    case '\\': out += '\\'; break;
-    case 'b': out += '\b'; break;
-    case 'f': out += '\f'; break;
-    case 'n': out += '\n'; break;
-    case 'r': out += '\r'; break;
-    case 't': out += '\t'; break;
+    case '"': out('"'); break;
+    case '\\': out('\\'); break;
+    case 'b': out('\b'); break;
+    case 'f': out('\f'); break;
+    case 'n': out('\n'); break;
+    case 'r': out('\r'); break;
+    case 't': out('\t'); break;
     case 'u': {
       in.next();
       if (!in.literal("00", bad)) return false;
@@ -208,7 +209,7 @@ constexpr bool canonical_escape(Cursor& in, std::string& out) {
           value == '\t') {
         return in.fail(bad);
       }
-      out += static_cast<char>(value);
+      out(static_cast<char>(value));
       return true;
     }
     default: return in.fail(bad);
@@ -217,11 +218,11 @@ constexpr bool canonical_escape(Cursor& in, std::string& out) {
   return true;
 }
 
-// A string. The same UTF-8 either way; the escapes are what differ.
-template <bool Canonical, class Cursor>
-constexpr bool read_string(Cursor& in, std::string& out) {
+// A string, each byte of it as it is decoded handed to a sink. The same UTF-8
+// either way; the escapes are what differ.
+template <bool Canonical, class Cursor, class Sink>
+constexpr bool read_string_into(Cursor& in, Sink&& out) {
   if (!in.expect('"', "knot: expected a string")) return false;
-  out.clear();
   for (;;) {
     const int letter = in.peek();
     if (letter < 0) return in.fail("knot: a string that does not end");
@@ -238,7 +239,7 @@ constexpr bool read_string(Cursor& in, std::string& out) {
       continue;
     }
     if (letter < 0x80) {
-      out += static_cast<char>(letter);
+      out(static_cast<char>(letter));
       in.next();
       continue;
     }
@@ -269,19 +270,25 @@ constexpr bool read_string(Cursor& in, std::string& out) {
     } else {
       return in.fail("knot: not UTF-8");
     }
-    out += static_cast<char>(letter);
+    out(static_cast<char>(letter));
     in.next();
     for (int at = 0; at != more; ++at) {
       const int following = in.peek();
       if (following < low || following > high) {
         return in.fail("knot: not UTF-8");
       }
-      out += static_cast<char>(following);
+      out(static_cast<char>(following));
       in.next();
       low = 0x80;
       high = 0xbf;
     }
   }
+}
+
+template <bool Canonical, class Cursor>
+constexpr bool read_string(Cursor& in, std::string& out) {
+  out.clear();
+  return read_string_into<Canonical>(in, [&](char letter) { out += letter; });
 }
 
 inline constexpr std::int64_t most_integer = (std::int64_t{1} << 53) - 1;
@@ -409,7 +416,7 @@ constexpr bool pass_over(Cursor& in, int depth = 0) {
   std::string scratch;
   switch (in.peek()) {
     case '"':
-      return read_string<Canonical>(in, scratch);
+      return read_string_into<Canonical>(in, [](char) {});
     case 't':
       return in.literal("true", "knot: not a value");
     case 'f':
@@ -520,49 +527,105 @@ constexpr bool read_array(Cursor& in, std::vector<Element, Allocator>& out) {
   }
 }
 
-// The rank of a key among the type's, in the order they sort in, or the
-// number of keys where the type has no such key.
+// The key of a member, by the rank it sorts at.
+template <class Type, std::size_t Rank>
+inline constexpr std::string_view key_text =
+    schema_of<Type>.key_of(order_of<Type>[Rank]);
+
 template <class Type>
-constexpr std::size_t rank_of(std::string_view key) {
-  constexpr std::size_t size = schema<Type>::size;
-  std::size_t low = 0;
-  std::size_t high = size;
-  while (low < high) {
-    const std::size_t middle = (low + high) / 2;
-    if (schema_of<Type>.key_of(order_of<Type>[middle]) < key) {
-      low = middle + 1;
-    } else {
-      high = middle;
+inline constexpr std::size_t longest_key = [] {
+  std::size_t most = 0;
+  for (std::size_t at = 0; at != schema<Type>::size; ++at) {
+    most = std::max(most, schema_of<Type>.key_of(at).size());
+  }
+  return most;
+}();
+
+// A key as it is read: its bytes in room for one more than the longest of the
+// type's keys, so that a key too long to be one of them is known for what it
+// is. Where the whole of a longer key is wanted -- Canonical JSON's order of
+// keys the type does not have -- the rest goes into a string, and only then.
+template <std::size_t Room>
+struct key_buffer {
+  std::array<char, Room + 1> bytes{};
+  std::size_t size = 0;
+  std::string* rest = nullptr;
+
+  constexpr void operator()(char letter) {
+    if (size < bytes.size()) {
+      bytes[size] = letter;
+    } else if (rest) {
+      if (size == bytes.size()) rest->assign(bytes.data(), bytes.size());
+      *rest += letter;
     }
+    ++size;
   }
-  if (low != size && schema_of<Type>.key_of(order_of<Type>[low]) == key) {
-    return low;
+
+  constexpr void clear() { size = 0; }
+
+  // The key, where it could be one of the type's.
+  [[nodiscard]] constexpr std::optional<std::string_view> short_text() const {
+    if (size > Room) return std::nullopt;
+    return std::string_view(bytes.data(), size);
   }
-  return size;
+  // The whole of it, where rest was given.
+  [[nodiscard]] constexpr std::string_view text() const {
+    if (size <= bytes.size()) return std::string_view(bytes.data(), size);
+    return *rest;
+  }
+};
+
+// Which of the type's keys this is, by rank, or the number of keys where it is
+// none of them: the comparisons written out, one a key, for the compiler to
+// turn into a switch on the length and a few loads.
+template <class Type, std::size_t... Rank>
+constexpr std::size_t rank_of(std::string_view key,
+                              std::index_sequence<Rank...>) {
+  std::size_t found = sizeof...(Rank);
+  (void)((key == key_text<Type, Rank> ? (found = Rank, true) : false) || ...);
+  return found;
 }
 
 template <bool Canonical, class Type, class Cursor>
 constexpr bool read_object(Cursor& in, Type& out) {
   constexpr std::size_t size = schema<Type>::size;
+  constexpr std::size_t room = longest_key<Type>;
   if (!in.expect('{', "knot: expected an object")) return false;
   std::array<bool, size> seen{};
-  std::string key;
-  std::string previous;
+  key_buffer<room> key;
+  // For Canonical JSON, the key before, to be sorted after; and where the
+  // whole of a key longer than any of the type's goes.
+  key_buffer<room> previous;
+  std::string key_rest;
+  std::string previous_rest;
+  if constexpr (Canonical) {
+    key.rest = &key_rest;
+    previous.rest = &previous_rest;
+  }
   space<Canonical>(in);
   if (in.peek() != '}') {
     for (bool first = true;; first = false) {
       const std::size_t at = in.offset();
-      if (!read_string<Canonical>(in, key)) return false;
+      key.clear();
+      if (!read_string_into<Canonical>(in, key)) return false;
       if constexpr (Canonical) {
-        if (!first && !(previous < key)) {
+        if (!first && !(previous.text() < key.text())) {
           return in.fail_at("knot: keys out of order", at);
         }
-        previous = key;
+      }
+      const std::optional<std::string_view> known = key.short_text();
+      const std::size_t rank =
+          known ? rank_of<Type>(*known, std::make_index_sequence<size>{})
+                : size;
+      if constexpr (Canonical) {
+        std::swap(key, previous);
+        key.rest = &key_rest;
+        previous.rest = &previous_rest;
+        std::swap(key_rest, previous_rest);
       }
       space<Canonical>(in);
       if (!in.expect(':', "knot: expected ':'")) return false;
       space<Canonical>(in);
-      const std::size_t rank = rank_of<Type>(key);
       if (rank == size) {
         if (!pass_over<Canonical>(in)) return false;
       } else {
@@ -570,12 +633,12 @@ constexpr bool read_object(Cursor& in, Type& out) {
         seen[rank] = true;
         const bool member = [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
           bool read = false;
-          ((rank == Rank
-                ? (read = read_value<Canonical>(
-                       in, boost::pfr::get<order_of<Type>[Rank]>(out)),
-                   true)
-                : false) ||
-           ...);
+          (void)((rank == Rank
+                      ? (read = read_value<Canonical>(
+                             in, boost::pfr::get<order_of<Type>[Rank]>(out)),
+                         true)
+                      : false) ||
+                 ...);
           return read;
         }(std::make_index_sequence<size>{});
         if (!member) return false;
