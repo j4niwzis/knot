@@ -73,6 +73,7 @@ content plain(shapes::raw_event& event) {
 
 template <class Read>
 std::pair<double, double> measure(Read read, int times) {
+  for (int at = 0; at != times / 10; ++at) read();  // warm
   const std::size_t before = allocations;
   const auto start = std::chrono::steady_clock::now();
   for (int at = 0; at != times; ++at) read();

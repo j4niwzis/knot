@@ -60,6 +60,22 @@ class cursor {
   [[nodiscard]] constexpr bool at_end() const { return at_ == end_; }
   [[nodiscard]] constexpr std::size_t offset() const { return offset_; }
 
+  // Where the text is in memory: what is left of it, to be read in runs, and
+  // a step over as much of it as was.
+  static constexpr bool in_memory =
+      std::contiguous_iterator<Iterator> && std::sized_sentinel_for<Sentinel, Iterator>;
+  [[nodiscard]] constexpr std::string_view rest() const
+    requires in_memory
+  {
+    return {std::to_address(at_), static_cast<std::size_t>(end_ - at_)};
+  }
+  constexpr void skip(std::size_t count)
+    requires in_memory
+  {
+    at_ += static_cast<std::ptrdiff_t>(count);
+    offset_ += count;
+  }
+
   // The first failure is the one kept: everything after it is its consequence.
   constexpr bool fail(std::string_view why) { return fail_at(why, offset_); }
   constexpr bool fail_at(std::string_view why, std::size_t at) {
@@ -244,8 +260,23 @@ constexpr bool read_string_into(Cursor& in, Sink&& out) {
       continue;
     }
     if (letter < 0x80) {
-      out(static_cast<char>(letter));
-      in.next();
+      if constexpr (std::remove_cvref_t<Cursor>::in_memory &&
+                    requires { out.append(std::string_view()); }) {
+        // A run of what needs nothing done to it: up to a quote, a backslash,
+        // a control or a byte past ASCII, handed over in one piece.
+        const std::string_view left = in.rest();
+        std::size_t run = 1;
+        while (run != left.size()) {
+          const auto byte = static_cast<unsigned char>(left[run]);
+          if (byte < 0x20 || byte >= 0x80 || byte == '"' || byte == '\\') break;
+          ++run;
+        }
+        out.append(left.substr(0, run));
+        in.skip(run);
+      } else {
+        out(static_cast<char>(letter));
+        in.next();
+      }
       continue;
     }
     // UTF-8: how many bytes follow, and the range the first of them is in --
@@ -290,10 +321,23 @@ constexpr bool read_string_into(Cursor& in, Sink&& out) {
   }
 }
 
+// A sink that is a string: a byte, or a run of them.
+struct string_sink {
+  std::string& out;
+  constexpr void operator()(char letter) { out += letter; }
+  constexpr void append(std::string_view run) { out.append(run); }
+};
+
+// A sink that keeps nothing, for what is passed over.
+struct no_sink {
+  constexpr void operator()(char) {}
+  constexpr void append(std::string_view) {}
+};
+
 template <bool Canonical, class Cursor>
 constexpr bool read_string(Cursor& in, std::string& out) {
   out.clear();
-  return read_string_into<Canonical>(in, [&](char letter) { out += letter; });
+  return read_string_into<Canonical>(in, string_sink{out});
 }
 
 inline constexpr std::int64_t most_integer = (std::int64_t{1} << 53) - 1;
@@ -421,7 +465,7 @@ constexpr bool pass_over(Cursor& in, int depth = 0) {
   std::string scratch;
   switch (in.peek()) {
     case '"':
-      return read_string_into<Canonical>(in, [](char) {});
+      return read_string_into<Canonical>(in, no_sink{});
     case 't':
       return in.literal("true", "knot: not a value");
     case 'f':
@@ -1310,11 +1354,16 @@ constexpr went map_or_tree(Cursor& in, Map& out, value& tree) {
   }
 }
 
+// first_key: where the object's '{' and its first key were read already, to
+// choose the type by; the reading goes on from the ':' after it.
 template <bool Canonical, class Type, class Cursor>
-constexpr went object_or_tree(Cursor& in, Type& out, value& tree) {
+constexpr went object_or_tree(Cursor& in, Type& out, value& tree,
+                              std::string* first_key = nullptr) {
   constexpr std::size_t size = schema<Type>::size;
-  if (in.peek() != '{') return all_tree<Canonical>(in, tree);
-  in.next();
+  if (!first_key) {
+    if (in.peek() != '{') return all_tree<Canonical>(in, tree);
+    in.next();
+  }
   std::array<bool, size> seen{};
   // The members read so far and, from here on, the rest of the object: as a
   // tree, with what was read moved into it.
@@ -1327,12 +1376,16 @@ constexpr went object_or_tree(Cursor& in, Type& out, value& tree) {
     return went::tree;
   };
   std::string previous;
-  space<Canonical>(in);
-  if (in.peek() != '}') {
+  if (!first_key) space<Canonical>(in);
+  if (first_key || in.peek() != '}') {
     for (bool first = true;; first = false) {
       const std::size_t at = in.offset();
       std::string key;
-      if (!read_string<Canonical>(in, key)) return went::failed;
+      if (first && first_key) {
+        key = std::move(*first_key);
+      } else if (!read_string<Canonical>(in, key)) {
+        return went::failed;
+      }
       if constexpr (Canonical) {
         if (!first && !(previous < key)) {
           in.fail_at("knot: keys out of order", at);
@@ -1431,22 +1484,102 @@ constexpr went read_or_tree(Cursor& in, Type& out, value& tree) {
 // ---------------------------------------------------------------------------
 // knot::by: the content read into one alternative, the tag deciding.
 
-// The content: into the alternative the tag chose, if it came first; into
-// the first alternative otherwise. Either turns into a tree where it does not
-// fit.
+// Which alternative a first key points to, where the tag has not come yet:
+// the first typed one that has such a key, or else the knot::value there is
+// for what no type has, or else the first.
+template <class By>
+constexpr std::size_t guessed_by_key(std::string_view key);
+template <name Tag, class... Alternatives>
+struct guess_of {
+  static constexpr std::size_t by_key(std::string_view key) {
+    std::size_t found = std::variant_npos;
+    std::size_t at = 0;
+    (void)(([&] {
+             if constexpr (!std::same_as<Alternatives, value>) {
+               return rank_of<Alternatives>(
+                          key, std::make_index_sequence<schema<Alternatives>::size>{}) !=
+                      schema<Alternatives>::size;
+             } else {
+               return false;
+             }
+           }()
+               ? (found = at, true)
+               : (++at, false)) ||
+           ...);
+    if (found != std::variant_npos) return found;
+    constexpr std::size_t fallback =
+        by_alternatives<by<Tag, Alternatives...>>::fallback;
+    return fallback != std::variant_npos ? fallback : 0;
+  }
+};
+template <name Tag, class... Alternatives>
+constexpr std::size_t guessed(const by<Tag, Alternatives...>*, std::string_view key) {
+  return guess_of<Tag, Alternatives...>::by_key(key);
+}
+
+// The content into one alternative: the one the tag chose, if it came first;
+// otherwise the one its first key points to. Either turns into a tree where
+// it does not fit.
 template <bool Canonical, class By, class Cursor>
 constexpr bool read_by(Cursor& in, By& out) {
   using alternatives = by_alternatives<By>;
   auto& state = out.reading;
   state.in_tree = false;
-  const std::size_t into = state.chosen != std::variant_npos ? state.chosen : 0;
+  std::size_t into = state.chosen;
+  std::string first_key;
+  bool have_key = false;
+  if (into == std::variant_npos) {
+    into = 0;
+    if (in.peek() == '{') {
+      in.next();
+      space<Canonical>(in);
+      if (in.peek() == '}') {
+        // Empty: whatever it is, it is that as a tree; the tag makes it more.
+        in.next();
+        out.data().template emplace<0>();
+        state.in_tree = true;
+        state.tree = value(value::object{});
+        return true;
+      }
+      if (!read_string<Canonical>(in, first_key)) return false;
+      have_key = true;
+      into = guessed(static_cast<const By*>(nullptr), first_key);
+    }
+  }
   return [&]<std::size_t... At>(std::index_sequence<At...>) {
     bool read = false;
     (void)((into == At
                 ? (read = [&] {
                      auto& held = out.data().template emplace<At>();
+                     using held_type = std::remove_cvref_t<decltype(held)>;
                      value turned;
-                     const went made = read_or_tree<Canonical>(in, held, turned);
+                     went made = went::failed;
+                     if (!have_key) {
+                       made = read_or_tree<Canonical>(in, held, turned);
+                     } else if constexpr (std::same_as<held_type, value>) {
+                       // Read on as a tree from the first key.
+                       value::object members;
+                       space<Canonical>(in);
+                       if (!in.expect(':', "knot: expected ':'")) return false;
+                       space<Canonical>(in);
+                       auto& one = members[first_key];
+                       if (!read_any<Canonical>(in, one)) return false;
+                       if (!rest_of_object<Canonical>(in, members, first_key)) return false;
+                       held = value(std::move(members));
+                       made = went::fit;
+                     } else if constexpr (described<held_type>) {
+                       made = object_or_tree<Canonical>(in, held, turned, &first_key);
+                     } else {
+                       // Not an object, though the text is: the whole a tree.
+                       value::object members;
+                       space<Canonical>(in);
+                       if (!in.expect(':', "knot: expected ':'")) return false;
+                       space<Canonical>(in);
+                       if (!read_any<Canonical>(in, members[first_key])) return false;
+                       if (!rest_of_object<Canonical>(in, members, first_key)) return false;
+                       turned = value(std::move(members));
+                       made = went::tree;
+                     }
                      if (made == went::failed) return false;
                      if (made == went::tree) {
                        state.in_tree = true;
