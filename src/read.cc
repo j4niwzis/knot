@@ -1574,6 +1574,16 @@ constexpr std::expected<Type, error> read(Range&& text) {
                                          std::ranges::end(text));
 }
 
+// A tree as a typed value, moved out of it; nothing, and the tree kept whole,
+// where it does not fit.
+template <class Type>
+constexpr std::optional<Type> from_value(value& tree) {
+  if (!detail::tree_fits<Type>(tree)) return std::nullopt;
+  Type made{};
+  if (!detail::from_tree(tree, made)) return std::nullopt;
+  return made;
+}
+
 // Canonical JSON and nothing else: what a signature or a hash is taken over.
 template <described Type>
 constexpr std::expected<Type, error> read(std::string_view text, canonical_t) {
