@@ -938,6 +938,16 @@ struct key_buffer {
     ++size;
   }
 
+  // A run at once, where the string reader has one.
+  constexpr void append(std::string_view run) {
+    if (size + run.size() <= bytes.size()) {
+      std::ranges::copy(run, bytes.data() + size);
+      size += run.size();
+    } else {
+      for (const char letter : run) (*this)(letter);
+    }
+  }
+
   constexpr void clear() { size = 0; }
 
   // The key, where it could be one of the type's.
