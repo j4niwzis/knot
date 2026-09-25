@@ -593,8 +593,14 @@ constexpr bool read_object(Cursor& in, Type& out) {
   if (!in.expect('{', "knot: expected an object")) return false;
   std::array<bool, size> seen{};
   key_buffer<room> key;
-  // For Canonical JSON, the key before, to be sorted after; and where the
-  // whole of a key longer than any of the type's goes.
+  // For Canonical JSON: the rank of the key expected next -- the keys arrive
+  // sorted and so are the type's, so a key is that one, one the type does not
+  // have that sorts before it, or a sign that it is missing. Only two unknown
+  // keys in a row need each other to be sorted: the one before is kept for
+  // that, and the whole of a key longer than any of the type's goes into a
+  // string, and only then.
+  std::size_t next = 0;
+  bool previous_unknown = false;
   key_buffer<room> previous;
   std::string key_rest;
   std::string previous_rest;
@@ -604,24 +610,37 @@ constexpr bool read_object(Cursor& in, Type& out) {
   }
   space<Canonical>(in);
   if (in.peek() != '}') {
-    for (bool first = true;; first = false) {
+    for (;;) {
       const std::size_t at = in.offset();
       key.clear();
       if (!read_string_into<Canonical>(in, key)) return false;
+      std::size_t rank = size;
       if constexpr (Canonical) {
-        if (!first && !(previous.text() < key.text())) {
-          return in.fail_at("knot: keys out of order", at);
+        const std::string_view text = key.text();
+        const std::string_view expected =
+            next != size ? schema_of<Type>.key_of(order_of<Type>[next])
+                         : std::string_view();
+        if (next != size && text == expected) {
+          rank = next++;
+          previous_unknown = false;
+        } else if (next == size || text < expected) {
+          const bool in_order =
+              previous_unknown
+                  ? previous.text() < text
+                  : next == 0 ||
+                        schema_of<Type>.key_of(order_of<Type>[next - 1]) < text;
+          if (!in_order) return in.fail_at("knot: keys out of order", at);
+          std::swap(key, previous);
+          key.rest = &key_rest;
+          previous.rest = &previous_rest;
+          std::swap(key_rest, previous_rest);
+          previous_unknown = true;
+        } else {
+          return in.fail_at("knot: a key is missing", at);
         }
-      }
-      const std::optional<std::string_view> known = key.short_text();
-      const std::size_t rank =
-          known ? rank_of<Type>(*known, std::make_index_sequence<size>{})
-                : size;
-      if constexpr (Canonical) {
-        std::swap(key, previous);
-        key.rest = &key_rest;
-        previous.rest = &previous_rest;
-        std::swap(key_rest, previous_rest);
+      } else {
+        const std::optional<std::string_view> known = key.short_text();
+        if (known) rank = rank_of<Type>(*known, std::make_index_sequence<size>{});
       }
       space<Canonical>(in);
       if (!in.expect(':', "knot: expected ':'")) return false;

@@ -13,7 +13,7 @@ TEST(Read, WhereItFailed) {
   EXPECT_EQ(got.error().offset, 23u);  // the '1' after the '0'
   const auto keys = strict<event>(R"({"depth":0,"content":"","prev":[]})");
   ASSERT_FALSE(keys);
-  EXPECT_EQ(keys.error().offset, 11u);  // "content" after "depth"
+  EXPECT_EQ(keys.error().offset, 1u);  // "depth" where "content" is due
   const auto after = strict<event>(R"({"content":"","depth":0,"prev":[]}x)");
   ASSERT_FALSE(after);
   EXPECT_EQ(after.error().offset, 34u);  // the x
