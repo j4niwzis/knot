@@ -199,6 +199,18 @@ TEST(ByRandom, AgreesWithTheTreeThenTyped) {
       ASSERT_TRUE(piecewise) << text;
       ASSERT_EQ(knot::to_json_string(*piecewise), knot::to_json_string(*by)) << text;
     }
+    // And as Canonical JSON -- content always before type -- read strictly.
+    {
+      const std::string canonical = knot::to_json_string(*plain);
+      const auto strict = knot::read<typed_event>(canonical, knot::canonical);
+      ASSERT_TRUE(strict) << strict.error().message << " at " << strict.error().offset << " in "
+                          << canonical;
+      ASSERT_EQ(strict->content.data().index(), by->content.data().index()) << canonical;
+      // (Again but for a null for an optional member, kept as empty.)
+      if (canonical.find("null") == std::string::npos) {
+        ASSERT_EQ(knot::to_json_string(*strict), canonical);
+      }
+    }
     // Written back: nothing lost -- except a null for an optional member,
     // which a typed member keeps as empty.
     if (text.find("null") == std::string::npos) {
