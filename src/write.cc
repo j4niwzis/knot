@@ -20,6 +20,7 @@ import std;
 import boost.pfr;
 export import knot.format;
 export import knot.value;
+import knot.read;
 
 namespace knot::detail::lazy {
 
@@ -290,10 +291,28 @@ class object_frame final : public frame {
   bool closed_ = false;
 };
 
+// A tree made for the writing, kept for as long as it is written.
+class owned_frame final : public frame {
+ public:
+  explicit owned_frame(knot::value tree) : tree_(std::move(tree)) {}
+
+  constexpr step next() override {
+    if (started_) return step::done();
+    started_ = true;
+    return step::into(frame_for(tree_));
+  }
+
+ private:
+  knot::value tree_;
+  bool started_ = false;
+};
+
 template <class Type>
 constexpr std::unique_ptr<frame> frame_for(const Type& value) {
   if constexpr (requires { value.reading; value.data(); }) {
-    // A knot::by: the alternative it holds.
+    // A knot::by: the alternative it holds -- with what it did not have laid
+    // back in, where there is any.
+    if (!value.unknown.is_null()) return std::make_unique<owned_frame>(as_tree(value));
     return std::visit([](const auto& held) { return frame_for(held); },
                       value.data());
   } else if constexpr (std::same_as<Type, knot::value>) {

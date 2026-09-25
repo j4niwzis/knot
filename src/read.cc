@@ -2260,6 +2260,22 @@ constexpr std::expected<Type, error> read(Range&& text) {
                                          std::ranges::end(text));
 }
 
+// The content of a knot::by whole, as a tree: the alternative it holds with
+// what it did not have laid back in -- what is written, so that an event read
+// is written back with nothing lost.
+template <class By>
+  requires requires(const By& content) { content.unknown; content.data(); }
+value as_tree(const By& content) {
+  value tree = std::visit(
+      [](const auto& held) {
+        auto copy = held;
+        return detail::to_tree(std::move(copy));
+      },
+      content.data());
+  detail::lay(tree, content.unknown);
+  return tree;
+}
+
 // A tree as a typed value, moved out of it; nothing, and the tree kept whole,
 // where it does not fit.
 template <class Type>
