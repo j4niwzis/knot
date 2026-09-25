@@ -1714,6 +1714,114 @@ constexpr bool read_by(Cursor& in, By& out) {
   }(std::make_index_sequence<alternatives::count>{});
 }
 
+// One described type made another, member by member, matched by key: the same
+// member type moved straight across; a different one made through a tree of
+// that member alone; a key only the target has taken from the kept keys; a
+// key only the source has left over, with whatever the target does not have.
+// Asked first whether it would fit, so that nothing moves where it would not.
+template <class From, class To>
+constexpr bool hands_over(const From& from, const value& overlay) {
+  const auto* kept = std::get_if<value::object>(&overlay.data());
+  return [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
+    return (true && ... && [&] {
+      using to_member = field_t<To, order_of<To>[Rank]>;
+      constexpr std::string_view key = key_text<To, Rank>;
+      constexpr std::size_t there =
+          rank_of<From>(key, std::make_index_sequence<schema<From>::size>{});
+      if constexpr (there != schema<From>::size) {
+        using from_member = field_t<From, order_of<From>[there]>;
+        if constexpr (std::same_as<from_member, to_member>) {
+          return true;
+        } else {
+          value one = to_tree(from_member(boost::pfr::get<order_of<From>[there]>(from)));
+          if (kept) {
+            if (const auto found = kept->find(key); found != kept->end()) {
+              lay(one, found->second);
+            }
+          }
+          return tree_fits<to_member>(one);
+        }
+      } else {
+        if (kept) {
+          if (const auto found = kept->find(key); found != kept->end()) {
+            return tree_fits<to_member>(found->second);
+          }
+        }
+        return is_optional<to_member>::value;
+      }
+    }());
+  }(std::make_index_sequence<schema<To>::size>{});
+}
+
+template <class From, class To>
+constexpr void hand_over(From& from, value& overlay, To& to, value& rest) {
+  auto* kept = std::get_if<value::object>(&overlay.data());
+  value::object left;
+  const auto take = [&](std::string_view key) -> value* {
+    if (!kept) return nullptr;
+    const auto found = kept->find(key);
+    return found == kept->end() ? nullptr : &found->second;
+  };
+  // What the target has.
+  [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
+    (([&] {
+       using to_member = field_t<To, order_of<To>[Rank]>;
+       constexpr std::string_view key = key_text<To, Rank>;
+       auto& into = boost::pfr::get<order_of<To>[Rank]>(to);
+       constexpr std::size_t there =
+           rank_of<From>(key, std::make_index_sequence<schema<From>::size>{});
+       if constexpr (there != schema<From>::size) {
+         using from_member = field_t<From, order_of<From>[there]>;
+         auto& had = boost::pfr::get<order_of<From>[there]>(from);
+         if constexpr (std::same_as<from_member, to_member>) {
+           into = std::move(had);
+           if (value* inner = take(key)) {
+             left.emplace(std::string(key), std::move(*inner));
+           }
+         } else {
+           value one = to_tree(std::move(had));
+           if (value* inner = take(key)) lay(one, std::move(*inner));
+           value extra = left_over<to_member>(one);
+           from_tree(one, into);
+           if (!extra.is_null()) left.emplace(std::string(key), std::move(extra));
+         }
+       } else if (value* found = take(key)) {
+         value extra = left_over<to_member>(*found);
+         from_tree(*found, into);
+         if (!extra.is_null()) left.emplace(std::string(key), std::move(extra));
+       }
+     }()),
+     ...);
+  }(std::make_index_sequence<schema<To>::size>{});
+  // What only the source has.
+  [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
+    (([&] {
+       constexpr std::string_view key = key_text<From, Rank>;
+       if constexpr (rank_of<To>(key, std::make_index_sequence<schema<To>::size>{}) ==
+                     schema<To>::size) {
+         auto& had = boost::pfr::get<order_of<From>[Rank]>(from);
+         using from_member = field_t<From, order_of<From>[Rank]>;
+         if constexpr (is_optional<from_member>::value) {
+           if (!had) return;
+         }
+         value one = to_tree(std::move(had));
+         if (value* inner = take(key)) lay(one, std::move(*inner));
+         left.emplace(std::string(key), std::move(one));
+       }
+     }()),
+     ...);
+  }(std::make_index_sequence<schema<From>::size>{});
+  // And the kept keys neither has.
+  if (kept) {
+    for (auto&& [key, one] : *kept) {
+      if (rank_of<To>(key, std::make_index_sequence<schema<To>::size>{}) != schema<To>::size) continue;
+      if (rank_of<From>(key, std::make_index_sequence<schema<From>::size>{}) != schema<From>::size) continue;
+      left.emplace(std::string(key), std::move(one));
+    }
+  }
+  rest = left.empty() ? value() : value(std::move(left));
+}
+
 // Once the object is read: the content made the alternative its tag names.
 // Read into that one, it stays, with what it did not have in unknown. Read
 // into another, or turned into a tree, it is made whole again as a tree --
@@ -1728,6 +1836,39 @@ constexpr bool settle_by(By& out, std::string_view tag) {
   if (target == std::variant_npos) return false;
   const std::size_t read_into = out.data().index();
   if (!state.in_tree && read_into == target) return true;
+  if (!state.in_tree) {
+    // From one typed alternative to another: directly, where it fits.
+    std::optional<typename By::variant> handed;
+    std::visit(
+        [&](auto& held) {
+          using from_type = std::remove_cvref_t<decltype(held)>;
+          if constexpr (described<from_type>) {
+            [&]<std::size_t... At>(std::index_sequence<At...>) {
+              (void)((target == At
+                          ? ([&] {
+                               using to_type =
+                                   std::variant_alternative_t<At, typename By::variant>;
+                               if constexpr (described<to_type>) {
+                                 if (!hands_over<from_type, to_type>(held, out.unknown)) return;
+                                 to_type made{};
+                                 value rest;
+                                 hand_over(held, out.unknown, made, rest);
+                                 handed.emplace(std::in_place_index<At>, std::move(made));
+                                 out.unknown = std::move(rest);
+                               }
+                             }(),
+                             true)
+                          : false) ||
+                     ...);
+            }(std::make_index_sequence<alternatives::count>{});
+          }
+        },
+        out.data());
+    if (handed) {
+      out.data() = std::move(*handed);
+      return true;
+    }
+  }
   value tree;
   if (state.in_tree) {
     tree = std::move(state.tree);
