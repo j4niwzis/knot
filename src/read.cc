@@ -693,8 +693,71 @@ constexpr bool read_object(Cursor& in, Type& out) {
 
 // An object whose keys are the data: each key read whole, a key twice
 // refused, and in Canonical JSON the keys sorted.
+// The same into sorted vectors: the keys and the values gathered as they come,
+// then handed over whole -- as they are where Canonical JSON sorted them
+// already, sorted once where ordinary JSON did not.
+template <bool Canonical, class Map, class Cursor>
+constexpr bool read_flat_map(Cursor& in, Map& out) {
+  const std::size_t start = in.offset();
+  if (!in.expect('{', "knot: expected an object")) return false;
+  typename Map::key_container_type keys;
+  typename Map::mapped_container_type values;
+  space<Canonical>(in);
+  if (in.peek() != '}') {
+    for (;;) {
+      const std::size_t at = in.offset();
+      std::string& key = keys.emplace_back();
+      if (!read_string<Canonical>(in, key)) return false;
+      if constexpr (Canonical) {
+        if (keys.size() > 1 && !(keys[keys.size() - 2] < key)) {
+          return in.fail_at("knot: keys out of order", at);
+        }
+      }
+      space<Canonical>(in);
+      if (!in.expect(':', "knot: expected ':'")) return false;
+      space<Canonical>(in);
+      if (!read_value<Canonical>(in, values.emplace_back())) return false;
+      space<Canonical>(in);
+      if (in.peek() == ',') {
+        in.next();
+        space<Canonical>(in);
+        continue;
+      }
+      break;
+    }
+  }
+  if (!in.expect('}', "knot: expected ',' or '}'")) return false;
+  if constexpr (!Canonical) {
+    std::vector<std::size_t> order(keys.size());
+    for (std::size_t at = 0; at != order.size(); ++at) order[at] = at;
+    std::ranges::stable_sort(order, {}, [&](std::size_t at) -> const std::string& {
+      return keys[at];
+    });
+    for (std::size_t at = 1; at < order.size(); ++at) {
+      if (keys[order[at - 1]] == keys[order[at]]) {
+        return in.fail_at("knot: a key twice", start);
+      }
+    }
+    typename Map::key_container_type sorted_keys;
+    typename Map::mapped_container_type sorted_values;
+    sorted_keys.reserve(keys.size());
+    sorted_values.reserve(values.size());
+    for (const std::size_t at : order) {
+      sorted_keys.push_back(std::move(keys[at]));
+      sorted_values.push_back(std::move(values[at]));
+    }
+    keys = std::move(sorted_keys);
+    values = std::move(sorted_values);
+  }
+  out = Map(std::sorted_unique, std::move(keys), std::move(values));
+  return true;
+}
+
 template <bool Canonical, class Map, class Cursor>
 constexpr bool read_map(Cursor& in, Map& out) {
+  if constexpr (is_flat_map<Map>::value) {
+    return read_flat_map<Canonical>(in, out);
+  }
   if (!in.expect('{', "knot: expected an object")) return false;
   out.clear();
   space<Canonical>(in);

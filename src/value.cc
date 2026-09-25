@@ -5,7 +5,7 @@
 // The content of an event of a type nobody here knows, or of one that is read
 // before its type is: null, true and false, an integer, a number with a
 // fraction or an exponent (ordinary JSON only), a string, an array, an object.
-// Objects keep their keys sorted by their bytes, so a value is written back as
+// Objects keep their keys sorted by their bytes, in a std::flat_map, so a value is written back as
 // Canonical JSON wherever it holds nothing Canonical JSON cannot say.
 export module knot.value;
 
@@ -16,7 +16,9 @@ export namespace knot {
 class value {
  public:
   using array = std::vector<value>;
-  using object = std::map<std::string, value, std::less<>>;
+  // Sorted vectors of keys and of values: in Canonical JSON the keys arrive
+  // in order, so an object is appended to and never rearranged.
+  using object = std::flat_map<std::string, value, std::less<>>;
   using variant = std::variant<std::nullptr_t, bool, std::int64_t, double,
                                std::string, array, object>;
 

@@ -91,6 +91,22 @@ template <class Value, class Allocator>
 struct is_map<std::map<std::string, Value, std::less<>, Allocator>>
     : std::true_type {};
 
+// The same in sorted vectors: std::flat_map.
+template <class Type>
+struct is_flat_map : std::false_type {};
+template <class Value, class Keys, class Values>
+struct is_flat_map<std::flat_map<std::string, Value, std::less<std::string>, Keys, Values>>
+    : std::true_type {};
+template <class Value, class Keys, class Values>
+struct is_flat_map<std::flat_map<std::string, Value, std::less<>, Keys, Values>>
+    : std::true_type {};
+template <class Value, class Keys, class Values>
+struct is_map<std::flat_map<std::string, Value, std::less<std::string>, Keys, Values>>
+    : std::true_type {};
+template <class Value, class Keys, class Values>
+struct is_map<std::flat_map<std::string, Value, std::less<>, Keys, Values>>
+    : std::true_type {};
+
 template <class Type>
 struct is_optional : std::false_type {};
 template <class Value>
