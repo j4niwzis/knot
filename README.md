@@ -185,8 +185,9 @@ Besides a test a case, two tests made up at random:
 
 Both run clean under AddressSanitizer and UndefinedBehaviorSanitizer.
 
-One thing a typed value does not keep: `null` for an optional member reads as
-empty, and is written as no key at all.
+A plain typed value does not keep a `null` for an optional member: it reads as
+empty and is written as no key. Inside a `knot::by` the null is kept, with the
+other keys, and written back.
 
 ## Building
 

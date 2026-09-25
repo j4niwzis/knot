@@ -1640,15 +1640,25 @@ constexpr value left_over(const value& tree) {
         overlay.emplace(std::string(key), one);
         continue;
       }
+      bool null_kept = false;
       value inner = [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
         value found;
         (void)((rank == Rank
-                    ? (found = left_over<field_t<Type, order_of<Type>[Rank]>>(one), true)
+                    ? ([&] {
+                         using member_type = field_t<Type, order_of<Type>[Rank]>;
+                         // A null the optional member reads as empty: kept
+                         // here, so that it is written back.
+                         if constexpr (is_optional<member_type>::value) {
+                           null_kept = one.is_null();
+                         }
+                         found = left_over<member_type>(one);
+                       }(),
+                       true)
                     : false) ||
                ...);
         return found;
       }(std::make_index_sequence<schema<Type>::size>{});
-      if (!inner.is_null()) overlay.emplace(std::string(key), std::move(inner));
+      if (!inner.is_null() || null_kept) overlay.emplace(std::string(key), std::move(inner));
     }
     return overlay.empty() ? value() : value(std::move(overlay));
   } else {
@@ -1838,8 +1848,26 @@ constexpr went object_or_tree(Cursor& in, Type& out, value& tree, value* extras,
         }
         value turned;
         value inner;
+        bool null_kept = false;
         const went member = [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
           went result = went::failed;
+          (void)((rank == Rank
+                      ? ([&] {
+                           auto& held = boost::pfr::get<order_of<Type>[Rank]>(out);
+                           using member_type = std::remove_cvref_t<decltype(held)>;
+                           if constexpr (is_optional<member_type>::value) {
+                             if (extras && in.peek() == 'n') {
+                               held.reset();
+                               null_kept = true;
+                               result = in.literal("null", "knot: not a value") ? went::fit
+                                                                               : went::failed;
+                             }
+                           }
+                         }(),
+                         true)
+                      : false) ||
+                 ...);
+          if (null_kept) return result;
           (void)((rank == Rank
                       ? (result = read_or_tree<Canonical>(
                              in, boost::pfr::get<order_of<Type>[Rank]>(out), turned,
@@ -1852,7 +1880,7 @@ constexpr went object_or_tree(Cursor& in, Type& out, value& tree, value* extras,
         if (member == went::failed) return went::failed;
         if (member == went::tree) return turn(std::move(key), std::move(turned), previous);
         seen[rank] = true;
-        if (!inner.is_null()) overlay.emplace(std::move(key), std::move(inner));
+        if (!inner.is_null() || null_kept) overlay.emplace(std::move(key), std::move(inner));
       }
       space<Canonical>(in);
       if (in.peek() == ',') {
@@ -2096,9 +2124,10 @@ constexpr void hand_over(From& from, value& overlay, To& to, value& rest) {
            if (!extra.is_null()) left.emplace(std::string(key), std::move(extra));
          }
        } else if (value* found = take(key)) {
+         const bool null_kept = is_optional<to_member>::value && found->is_null();
          value extra = left_over<to_member>(*found);
          from_tree(*found, into);
-         if (!extra.is_null()) left.emplace(std::string(key), std::move(extra));
+         if (!extra.is_null() || null_kept) left.emplace(std::string(key), std::move(extra));
        }
      }()),
      ...);
@@ -2112,7 +2141,11 @@ constexpr void hand_over(From& from, value& overlay, To& to, value& rest) {
          auto& had = boost::pfr::get<order_of<From>[Rank]>(from);
          using from_member = field_t<From, order_of<From>[Rank]>;
          if constexpr (is_optional<from_member>::value) {
-           if (!had) return;
+           if (!had) {
+             // Empty, but perhaps for a null that was kept: keep it still.
+             if (value* inner = take(key)) left.emplace(std::string(key), std::move(*inner));
+             return;
+           }
          }
          value one = to_tree(std::move(had));
          if (value* inner = take(key)) lay(one, std::move(*inner));

@@ -206,16 +206,10 @@ TEST(ByRandom, AgreesWithTheTreeThenTyped) {
       ASSERT_TRUE(strict) << strict.error().message << " at " << strict.error().offset << " in "
                           << canonical;
       ASSERT_EQ(strict->content.data().index(), by->content.data().index()) << canonical;
-      // (Again but for a null for an optional member, kept as empty.)
-      if (canonical.find("null") == std::string::npos) {
-        ASSERT_EQ(knot::to_json_string(*strict), canonical);
-      }
+      ASSERT_EQ(knot::to_json_string(*strict), canonical);
     }
-    // Written back: nothing lost -- except a null for an optional member,
-    // which a typed member keeps as empty.
-    if (text.find("null") == std::string::npos) {
-      ASSERT_EQ(knot::to_json_string(*by), knot::to_json_string(*plain)) << text;
-    }
+    // Written back: nothing lost, not even a null for an optional member.
+    ASSERT_EQ(knot::to_json_string(*by), knot::to_json_string(*plain)) << text;
   }
   // Enough of each kind to mean something.
   EXPECT_GT(typed, 1000);
