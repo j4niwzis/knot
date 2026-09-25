@@ -21,7 +21,7 @@ TEST(Read, NotCanonicalStrings) {
        }) {
     const std::string text =
         R"({"content":)" + std::string(body) + R"(,"depth":0,"prev":[]})";
-    EXPECT_FALSE(knot::read<event>(text)) << text;
+    EXPECT_FALSE(strict<event>(text)) << text;
   }
 }
 

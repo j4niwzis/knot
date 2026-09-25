@@ -8,7 +8,7 @@ import gtest;
 namespace {
 
 TEST(Read, ArraysOfObjectsAndOfArrays) {
-  const auto got = knot::read<shapes::many>(
+  const auto got = strict<shapes::many>(
       R"({"grid":[[1,2],[],[3]],)"
       R"("links":[{"event_id":"$a","rel_type":"r"},{"event_id":"$b","rel_type":"s"}]})");
   ASSERT_TRUE(got) << got.error().message;

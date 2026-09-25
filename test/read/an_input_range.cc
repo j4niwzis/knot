@@ -12,13 +12,13 @@ namespace {
 TEST(Read, AnInputRange) {
   const std::string text = R"({"content":"hi","depth":3,"prev":["$a"]})";
   const std::list<char> letters(text.begin(), text.end());
-  const auto got = knot::read<event>(letters);
+  const auto got = strict<event>(letters);
   ASSERT_TRUE(got) << got.error().message;
   EXPECT_EQ(got->content, "hi");
 
   const std::vector<std::string> pieces{R"({"content":"h)", R"(i","depth")",
                                         R"(:3,"prev":["$a"]})"};
-  const auto joined = knot::read<event>(pieces | std::views::join);
+  const auto joined = strict<event>(pieces | std::views::join);
   ASSERT_TRUE(joined) << joined.error().message;
   EXPECT_EQ(joined->prev, (std::vector<std::string>{"$a"}));
 }

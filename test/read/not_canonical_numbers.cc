@@ -13,11 +13,11 @@ TEST(Read, NotCanonicalNumbers) {
         "-9007199254740992", "12345678901234567"}) {
     const std::string text =
         R"({"content":"","depth":)" + std::string(depth) + R"(,"prev":[]})";
-    EXPECT_FALSE(knot::read<event>(text)) << text;
+    EXPECT_FALSE(strict<event>(text)) << text;
   }
-  EXPECT_TRUE(knot::read<event>(
+  EXPECT_TRUE(strict<event>(
       R"({"content":"","depth":9007199254740991,"prev":[]})"));
-  EXPECT_TRUE(knot::read<event>(
+  EXPECT_TRUE(strict<event>(
       R"({"content":"","depth":-9007199254740991,"prev":[]})"));
 }
 

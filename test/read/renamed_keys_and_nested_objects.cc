@@ -8,7 +8,7 @@ import gtest;
 namespace {
 
 TEST(Read, RenamedKeysAndNestedObjects) {
-  const auto got = knot::read<shapes::content>(
+  const auto got = strict<shapes::content>(
       R"({"body":"x","edited":true,)"
       R"("m.relates_to":{"event_id":"$e","rel_type":"m.thread"}})");
   ASSERT_TRUE(got) << got.error().message;

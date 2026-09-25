@@ -13,11 +13,11 @@ TEST(Read, NotCanonicalShapes) {
            R"({ "content":"","depth":0,"prev":[]})",
            R"({"depth":0,"content":"","prev":[]})",
            R"({"content":"","depth":0})",
-           R"({"content":"","depth":0,"prev":[],"x":1})",
+           R"({"content":"","depth":0,"prev":[],"a":1})",  // "a" sorts first
            R"({"content":"","depth":0,"prev":["a",]})",
            R"({"content":"","depth":0,"prev":["a""b"]})",
        }) {
-    EXPECT_FALSE(knot::read<event>(text)) << text;
+    EXPECT_FALSE(strict<event>(text)) << text;
   }
 }
 

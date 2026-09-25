@@ -9,7 +9,7 @@ namespace {
 
 TEST(Read, AnEvent) {
   const auto got =
-      knot::read<event>(R"({"content":"hi","depth":3,"prev":["$a","$b"]})");
+      strict<event>(R"({"content":"hi","depth":3,"prev":["$a","$b"]})");
   ASSERT_TRUE(got) << got.error().message;
   EXPECT_EQ(got->content, "hi");
   EXPECT_EQ(got->depth, 3);

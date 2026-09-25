@@ -8,7 +8,7 @@ import gtest;
 namespace {
 
 TEST(Read, UnicodeIsTakenAsItIs) {
-  const auto got = knot::read<event>(
+  const auto got = strict<event>(
       "{\"content\":\"\xd0\xbf\xe2\x82\xac\xf0\x9f\x98\x80\",\"depth\":-5,"
       "\"prev\":[]}");
   ASSERT_TRUE(got) << got.error().message;

@@ -8,7 +8,7 @@ import gtest;
 namespace {
 
 TEST(Read, EscapesAreDecoded) {
-  const auto got = knot::read<event>(
+  const auto got = strict<event>(
       R"({"content":"a\"b\\c\nd\u0001\u001f\t","depth":0,"prev":[]})");
   ASSERT_TRUE(got) << got.error().message;
   EXPECT_EQ(got->content, "a\"b\\c\nd\x01\x1f\t");
