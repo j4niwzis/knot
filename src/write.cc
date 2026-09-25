@@ -19,6 +19,7 @@ export module knot.write;
 import std;
 import boost.pfr;
 export import knot.format;
+export import knot.value;
 
 namespace knot::detail::lazy {
 
@@ -117,7 +118,7 @@ class piece_frame final : public frame {
   }
 
  private:
-  std::array<char, 24> digits_{};
+  std::array<char, 32> digits_{};
   std::string_view text_;
   bool said_ = false;
 };
@@ -291,7 +292,16 @@ class object_frame final : public frame {
 
 template <class Type>
 constexpr std::unique_ptr<frame> frame_for(const Type& value) {
-  if constexpr (std::same_as<Type, std::string>) {
+  if constexpr (std::same_as<Type, knot::value>) {
+    return std::visit([](const auto& held) { return frame_for(held); },
+                      value.data());
+  } else if constexpr (std::same_as<Type, std::nullptr_t>) {
+    return std::make_unique<piece_frame>(std::string_view("null"));
+  } else if constexpr (std::same_as<Type, double>) {
+    // Not Canonical JSON, which has no such numbers: the shortest text that
+    // reads back as the same double.
+    return std::make_unique<piece_frame>(value);
+  } else if constexpr (std::same_as<Type, std::string>) {
     return std::make_unique<string_frame>(value);
   } else if constexpr (std::same_as<Type, bool>) {
     return std::make_unique<piece_frame>(value ? std::string_view("true")

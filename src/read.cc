@@ -20,6 +20,7 @@ export module knot.read;
 import std;
 import boost.pfr;
 export import knot.format;
+export import knot.value;
 
 export namespace knot {
 
@@ -86,6 +87,10 @@ class cursor {
   [[no_unique_address]] Sentinel end_;
   std::size_t offset_ = 0;
   std::optional<error> failure_;
+
+ public:
+  // How deep the value being read nests, where no type bounds it.
+  int depth = 0;
 };
 
 // White space, where ordinary JSON allows it.
@@ -724,6 +729,101 @@ constexpr bool read_map(Cursor& in, Map& out) {
   }
 }
 
+// A number in a value. In Canonical JSON an integer and nothing else; in
+// ordinary JSON a whole number within 2^53 is an integer, and anything else a
+// double -- the text checked against JSON's grammar first, then converted.
+template <bool Canonical, class Cursor>
+constexpr bool read_any_number(Cursor& in, value& out) {
+  bool negative = false;
+  std::int64_t magnitude = 0;
+  if constexpr (Canonical) {
+    if (!canonical_number(in, negative, magnitude)) return false;
+    out = negative ? -magnitude : magnitude;
+    return true;
+  } else {
+    const std::size_t start = in.offset();
+    std::string text;
+    const auto digit = [&] { return in.peek() >= '0' && in.peek() <= '9'; };
+    const auto take = [&] {
+      text += static_cast<char>(in.peek());
+      in.next();
+    };
+    if (in.peek() == '-') take();
+    if (!digit()) return in.fail("knot: not a value");
+    if (in.peek() == '0') {
+      take();
+    } else {
+      while (digit()) take();
+    }
+    if (in.peek() == '.') {
+      take();
+      if (!digit()) return in.fail("knot: not a number");
+      while (digit()) take();
+    }
+    if (in.peek() == 'e' || in.peek() == 'E') {
+      take();
+      if (in.peek() == '+' || in.peek() == '-') take();
+      if (!digit()) return in.fail("knot: not a number");
+      while (digit()) take();
+    }
+    // A whole number in range is an integer, whatever its spelling.
+    cursor<const char*, const char*> again(text.data(), text.data() + text.size());
+    if (ordinary_number(again, negative, magnitude) && again.at_end()) {
+      out = negative ? -magnitude : magnitude;
+      return true;
+    }
+    double number = 0;
+    const auto made = std::from_chars(text.data(), text.data() + text.size(), number);
+    if (made.ec != std::errc{} || !std::isfinite(number)) {
+      return in.fail_at("knot: a number too large", start);
+    }
+    out = number;
+    return true;
+  }
+}
+
+// Any JSON, into a value: the nesting bounded here, since no type bounds it.
+template <bool Canonical, class Cursor>
+constexpr bool read_any(Cursor& in, value& out) {
+  if (in.depth == deepest_passed_over) return in.fail("knot: nested too deep");
+  ++in.depth;
+  const bool read = [&] {
+    switch (in.peek()) {
+      case '"': {
+        std::string text;
+        if (!read_string<Canonical>(in, text)) return false;
+        out = std::move(text);
+        return true;
+      }
+      case 't':
+        out = true;
+        return in.literal("true", "knot: not a value");
+      case 'f':
+        out = false;
+        return in.literal("false", "knot: not a value");
+      case 'n':
+        out = nullptr;
+        return in.literal("null", "knot: not a value");
+      case '[': {
+        value::array items;
+        if (!read_array<Canonical>(in, items)) return false;
+        out = std::move(items);
+        return true;
+      }
+      case '{': {
+        value::object members;
+        if (!read_map<Canonical>(in, members)) return false;
+        out = std::move(members);
+        return true;
+      }
+      default:
+        return read_any_number<Canonical>(in, out);
+    }
+  }();
+  --in.depth;
+  return read;
+}
+
 template <bool Canonical, class Type, class Cursor>
 constexpr bool read_value(Cursor& in, Type& out) {
   if constexpr (std::same_as<Type, std::string>) {
@@ -737,6 +837,8 @@ constexpr bool read_value(Cursor& in, Type& out) {
     return in.literal("false", "knot: expected true or false");
   } else if constexpr (json_integer<Type>) {
     return read_integer<Canonical>(in, out);
+  } else if constexpr (std::same_as<Type, value>) {
+    return read_any<Canonical>(in, out);
   } else if constexpr (is_optional<Type>::value) {
     // Present, or null: which is what absent is written as by some.
     if (in.peek() == 'n') {
