@@ -157,6 +157,86 @@ inline constexpr std::size_t lane = 32;
   return done;
 }
 
+// How many bytes from here belong in a string as they are, UTF-8 or not: up to
+// a quote, a backslash or a control.
+[[nodiscard]] constexpr std::size_t string_run(std::string_view text) {
+  std::size_t done = 0;
+  if !consteval {
+    while (done + lane <= text.size()) {
+      const bytes32 chunk = load32(text.data() + done);
+      const std::uint32_t stop =
+          mask_of(chunk < static_cast<unsigned char>(0x20)) |
+          mask_of(chunk == static_cast<unsigned char>('"')) |
+          mask_of(chunk == static_cast<unsigned char>('\\'));
+      if (stop != 0) return done + static_cast<std::size_t>(std::countr_zero(stop));
+      done += lane;
+    }
+  }
+  while (done != text.size()) {
+    const auto byte = static_cast<unsigned char>(text[done]);
+    if (byte < 0x20 || byte == '"' || byte == '\\') break;
+    ++done;
+  }
+  return done;
+}
+
+// How much of a run is well-formed UTF-8, ending where a character ends: all
+// of it, or up to the first byte that is not -- which the reading then meets a
+// byte at a time, and says where. 32 bytes of ASCII are passed at once.
+[[nodiscard]] constexpr std::size_t utf8_prefix(std::string_view text) {
+  std::size_t done = 0;
+  while (done != text.size()) {
+    if !consteval {
+      if (done + lane <= text.size()) {
+        const bytes32 chunk = load32(text.data() + done);
+        if (mask_of(chunk >= static_cast<unsigned char>(0x80)) == 0) {
+          done += lane;
+          continue;
+        }
+      }
+    }
+    const auto first = static_cast<unsigned char>(text[done]);
+    if (first < 0x80) {
+      ++done;
+      continue;
+    }
+    std::size_t more = 0;
+    unsigned char low = 0x80;
+    unsigned char high = 0xbf;
+    if (first >= 0xc2 && first <= 0xdf) {
+      more = 1;
+    } else if (first == 0xe0) {
+      more = 2;
+      low = 0xa0;
+    } else if (first == 0xed) {
+      more = 2;
+      high = 0x9f;
+    } else if (first >= 0xe1 && first <= 0xef) {
+      more = 2;
+    } else if (first == 0xf0) {
+      more = 3;
+      low = 0x90;
+    } else if (first >= 0xf1 && first <= 0xf3) {
+      more = 3;
+    } else if (first == 0xf4) {
+      more = 3;
+      high = 0x8f;
+    } else {
+      return done;
+    }
+    // The whole character has to be in the run.
+    if (done + more >= text.size()) return done;
+    for (std::size_t at = 1; at <= more; ++at) {
+      const auto following = static_cast<unsigned char>(text[done + at]);
+      if (following < low || following > high) return done;
+      low = 0x80;
+      high = 0xbf;
+    }
+    done += more + 1;
+  }
+  return done;
+}
+
 [[nodiscard]] constexpr bool space_byte(unsigned char byte) {
   return byte == ' ' || byte == '\n' || byte == '\r' || byte == '\t';
 }
@@ -320,6 +400,15 @@ template <bool Canonical, class Cursor, class Sink>
 constexpr bool read_string_into(Cursor& in, Sink&& out) {
   if (!in.expect('"', "knot: expected a string")) return false;
   for (;;) {
+    if constexpr (std::remove_cvref_t<Cursor>::in_memory &&
+                  requires { out.append(std::string_view()); }) {
+      const std::string_view left = in.rest();
+      const std::size_t whole = utf8_prefix(left.substr(0, string_run(left)));
+      if (whole != 0) {
+        out.append(left.substr(0, whole));
+        in.skip(whole);
+      }
+    }
     const int letter = in.peek();
     if (letter < 0) return in.fail("knot: a string that does not end");
     if (letter == '"') {

@@ -71,15 +71,22 @@ content plain(shapes::raw_event& event) {
   return std::move(event.content);
 }
 
+// The best of five rounds: a machine shared with others is slow at times, and
+// never fast by accident.
 template <class Read>
 std::pair<double, double> measure(Read read, int times) {
   for (int at = 0; at != times / 10; ++at) read();  // warm
-  const std::size_t before = allocations;
-  const auto start = std::chrono::steady_clock::now();
-  for (int at = 0; at != times; ++at) read();
-  const auto spent = std::chrono::steady_clock::now() - start;
-  return {std::chrono::duration<double, std::nano>(spent).count() / times,
-          double(allocations - before) / times};
+  double best = 1e300;
+  double allocated = 0;
+  for (int round = 0; round != 5; ++round) {
+    const std::size_t before = allocations;
+    const auto start = std::chrono::steady_clock::now();
+    for (int at = 0; at != times / 5; ++at) read();
+    const auto spent = std::chrono::steady_clock::now() - start;
+    best = std::min(best, std::chrono::duration<double, std::nano>(spent).count() / (times / 5));
+    allocated = double(allocations - before) / (times / 5);
+  }
+  return {best, allocated};
 }
 
 }  // namespace
