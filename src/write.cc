@@ -34,20 +34,52 @@ struct frame {
 
 // What a frame says next: a piece of text, a frame to go into, or that it is
 // done.
+//
+// A string or a number to be written is said as such rather than as a frame
+// of its own: the machine writes it with what it keeps for the purpose, so
+// that a leaf costs no allocation -- only an array, a map or an object does.
 struct step {
-  enum class what { piece, child, done } kind = what::done;
+  enum class what { piece, child, done, string, integer, floating } kind = what::done;
   std::string_view text;
   std::unique_ptr<frame> child;
+  std::int64_t integer = 0;
+  double floating = 0;
 
   static constexpr step piece(std::string_view text) { return {what::piece, text, {}}; }
   static constexpr step into(std::unique_ptr<frame> child) {
     return {what::child, {}, std::move(child)};
   }
   static constexpr step done() { return {}; }
+  static constexpr step string(std::string_view text) { return {what::string, text, {}}; }
+  static constexpr step whole(std::int64_t number) {
+    return {what::integer, {}, {}, number};
+  }
+  static constexpr step fraction(double number) {
+    return {what::floating, {}, {}, 0, number};
+  }
 };
 
 template <class Type>
 constexpr std::unique_ptr<frame> frame_for(const Type& value);
+
+template <class Type>
+constexpr step child_step(const Type& value) {
+  if constexpr (std::same_as<Type, std::string>) {
+    return step::string(value);
+  } else if constexpr (std::same_as<Type, bool>) {
+    return step::piece(value ? "true" : "false");
+  } else if constexpr (std::same_as<Type, std::nullptr_t>) {
+    return step::piece("null");
+  } else if constexpr (json_integer<Type>) {
+    return step::whole(static_cast<std::int64_t>(value));
+  } else if constexpr (std::same_as<Type, double>) {
+    return step::fraction(value);
+  } else if constexpr (is_optional<Type>::value) {
+    return child_step(*value);
+  } else {
+    return step::into(frame_for(value));
+  }
+}
 
 // A string: its quotes, runs that need nothing, and the escapes between them.
 class string_frame final : public frame {
@@ -145,7 +177,7 @@ class array_frame final : public frame {
       return step::piece(",");
     }
     comma_ = false;
-    return step::into(frame_for(values_[at_++]));
+    return child_step(values_[at_++]);
   }
 
  private:
@@ -181,14 +213,14 @@ class map_frame final : public frame {
     }
     if (stage_ == 1) {
       stage_ = 2;
-      return step::into(std::make_unique<string_frame>(at_->first));
+      return step::string(at_->first);
     }
     if (stage_ == 2) {
       stage_ = 3;
       return step::piece(":");
     }
     stage_ = 0;
-    return step::into(frame_for((at_++)->second));
+    return child_step((at_++)->second);
   }
 
  private:
@@ -229,7 +261,7 @@ class object_frame final : public frame {
     }
     keyed_ = false;
     ++written_;
-    return step::into(member(at_++));
+    return member(at_++);
   }
 
  private:
@@ -245,17 +277,15 @@ class object_frame final : public frame {
   }
 
   template <std::size_t... Rank>
-  constexpr std::unique_ptr<frame> member_of(std::size_t rank,
-                                   std::index_sequence<Rank...>) const {
-    std::unique_ptr<frame> found;
+  constexpr step member_of(std::size_t rank, std::index_sequence<Rank...>) const {
+    step found;
     ((rank == Rank
-          ? (found = frame_for(boost::pfr::get<order_of<Type>[Rank]>(value_)),
-             true)
+          ? (found = child_step(boost::pfr::get<order_of<Type>[Rank]>(value_)), true)
           : false) ||
      ...);
     return found;
   }
-  constexpr std::unique_ptr<frame> member(std::size_t rank) const {
+  constexpr step member(std::size_t rank) const {
     return member_of(rank, std::make_index_sequence<schema<Type>::size>{});
   }
 
@@ -355,7 +385,18 @@ class machine {
   }
 
   constexpr std::optional<std::string_view> next() {
-    while (!stack_.empty()) {
+    for (;;) {
+      // A string being written goes first, piece by piece.
+      if (string_) {
+        const step one = string_->next();
+        if (one.kind == step::what::done) {
+          string_.reset();
+          continue;
+        }
+        if (!one.text.empty()) return one.text;
+        continue;
+      }
+      if (stack_.empty()) return std::nullopt;
       step one = stack_.back()->next();
       switch (one.kind) {
         case step::what::piece:
@@ -367,13 +408,28 @@ class machine {
         case step::what::done:
           stack_.pop_back();
           break;
+        case step::what::string:
+          string_.emplace(one.text);
+          break;
+        case step::what::integer: {
+          const auto made = std::to_chars(digits_.data(), digits_.data() + digits_.size(),
+                                          one.integer);
+          return std::string_view(digits_.data(), made.ptr);
+        }
+        case step::what::floating: {
+          const auto made = std::to_chars(digits_.data(), digits_.data() + digits_.size(),
+                                          one.floating);
+          return std::string_view(digits_.data(), made.ptr);
+        }
       }
     }
-    return std::nullopt;
   }
 
  private:
   std::vector<std::unique_ptr<frame>> stack_;
+  // What a leaf is written with: no frame of its own.
+  std::optional<string_frame> string_;
+  std::array<char, 32> digits_{};
 };
 
 }  // namespace knot::detail::lazy
