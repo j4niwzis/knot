@@ -191,6 +191,14 @@ TEST(ByRandom, AgreesWithTheTreeThenTyped) {
       ASSERT_TRUE(by->content.is<knot::value>()) << text;
       ASSERT_TRUE(by->content.as<knot::value>() == plain->content) << text;
     }
+    // The same, read a character at a time from pieces, as from a socket.
+    if (round % 7 == 0) {
+      std::vector<std::string> pieces;
+      for (std::size_t at = 0; at < text.size(); at += 5) pieces.push_back(text.substr(at, 5));
+      const auto piecewise = knot::read<typed_event>(pieces | std::views::join);
+      ASSERT_TRUE(piecewise) << text;
+      ASSERT_EQ(knot::to_json_string(*piecewise), knot::to_json_string(*by)) << text;
+    }
     // Written back: nothing lost -- except a null for an optional member,
     // which a typed member keeps as empty.
     if (text.find("null") == std::string::npos) {
