@@ -10,6 +10,7 @@
 export module knot.value;
 
 import std;
+export import knot.schema;
 
 export namespace knot {
 
@@ -62,6 +63,58 @@ class value {
   }
 
   friend bool operator==(const value&, const value&) = default;
+
+ private:
+  variant held_;
+};
+
+// A value chosen by a sibling key -- the content of an event by its "type":
+//
+//   struct message { std::string msgtype; std::string body; };
+//   consteval auto json_schema(knot::type<message>) {
+//     return knot::schema<message>().tag("m.room.message");
+//   }
+//   struct room_event {
+//     std::string type;
+//     knot::by<"type", message, member, knot::value> content;
+//   };
+//
+// Each alternative says its tag in its own schema; knot::value last takes what
+// no tag names, and what a named alternative does not fit. Only one of them is
+// ever made while reading, whichever order "type" and the content come in.
+template <name Tag, class... Alternatives>
+class by {
+ public:
+  using variant = std::variant<Alternatives...>;
+  static constexpr std::string_view tag_key = Tag.view();
+
+  constexpr by() = default;
+  template <class Alternative>
+    requires(std::same_as<std::remove_cvref_t<Alternative>, Alternatives> || ...)
+  constexpr by(Alternative&& held) : held_(std::forward<Alternative>(held)) {}
+
+  [[nodiscard]] constexpr const variant& data() const& { return held_; }
+  [[nodiscard]] constexpr variant& data() & { return held_; }
+  template <class Alternative>
+  [[nodiscard]] constexpr bool is() const {
+    return std::holds_alternative<Alternative>(held_);
+  }
+  template <class Alternative>
+  [[nodiscard]] constexpr const Alternative& as() const {
+    return std::get<Alternative>(held_);
+  }
+
+  friend constexpr bool operator==(const by& one, const by& other) {
+    return one.held_ == other.held_;
+  }
+
+  // Where reading stands, between the content and the tag; nothing of the
+  // value itself.
+  struct reading_state {
+    std::size_t chosen = std::variant_npos;  // read into this by its tag
+    bool in_tree = false;                    // the content went to the tree
+    value tree;
+  } reading;
 
  private:
   variant held_;

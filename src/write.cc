@@ -292,7 +292,11 @@ class object_frame final : public frame {
 
 template <class Type>
 constexpr std::unique_ptr<frame> frame_for(const Type& value) {
-  if constexpr (std::same_as<Type, knot::value>) {
+  if constexpr (requires { value.reading; value.data(); }) {
+    // A knot::by: the alternative it holds.
+    return std::visit([](const auto& held) { return frame_for(held); },
+                      value.data());
+  } else if constexpr (std::same_as<Type, knot::value>) {
     return std::visit([](const auto& held) { return frame_for(held); },
                       value.data());
   } else if constexpr (std::same_as<Type, std::nullptr_t>) {

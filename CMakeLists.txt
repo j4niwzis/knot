@@ -38,7 +38,7 @@ endfunction()
 
 knot_module(knot_schema src/schema.cc Boost::pfr)
 knot_module(knot_format src/format.cc knot_schema Boost::pfr)
-knot_module(knot_value src/value.cc)
+knot_module(knot_value src/value.cc knot_schema)
 knot_module(knot_read src/read.cc knot_format knot_value Boost::pfr)
 knot_module(knot_write src/write.cc knot_format knot_value Boost::pfr)
 knot_module(knot src/knot.cc knot_schema knot_format knot_value knot_read knot_write Boost::pfr)

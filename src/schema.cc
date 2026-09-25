@@ -60,6 +60,15 @@ class schema {
     return made;
   }
 
+  // What names this type where a knot::by chooses among several: the value of
+  // the sibling key it is chosen by, "m.room.message" for a message.
+  [[nodiscard]] consteval schema tag(std::string_view said) const {
+    schema made = *this;
+    made.tag_ = said;
+    return made;
+  }
+  [[nodiscard]] constexpr std::string_view tag_name() const { return tag_; }
+
   // The key of the member at a place in declaration order.
   [[nodiscard]] constexpr std::string_view key_of(std::size_t at) const {
     return keys_[at];
@@ -75,6 +84,7 @@ class schema {
   }
 
   std::array<std::string_view, size> keys_{};
+  std::string_view tag_{};
 };
 
 // A type that says what it is called in JSON.
