@@ -136,14 +136,12 @@ using flags32 = bool __attribute__((ext_vector_type(32)));
 
 inline constexpr std::size_t lane = 32;
 
-[[nodiscard]] inline std::uint32_t mask_of(auto flags) {
+[[nodiscard]] inline std::uint32_t mask_of(const auto& flags) {
   return __builtin_bit_cast(std::uint32_t, __builtin_convertvector(flags, flags32));
 }
 
-[[nodiscard]] inline bytes32 load32(const char* at) {
-  bytes32 chunk;
+inline void load32(bytes32& chunk, const char* at) {
   std::memcpy(&chunk, at, lane);
-  return chunk;
 }
 
 // Whether a byte of a string is itself and nothing else: printable ASCII, and
@@ -157,7 +155,8 @@ inline constexpr std::size_t lane = 32;
   std::size_t done = 0;
   if !consteval {
     while (done + lane <= text.size()) {
-      const bytes32 chunk = load32(text.data() + done);
+      bytes32 chunk;
+      load32(chunk, text.data() + done);
       const bytes32 over = chunk - static_cast<unsigned char>(0x20);
       const std::uint32_t stop =
           mask_of(over >= static_cast<unsigned char>(0x60)) |
@@ -177,7 +176,8 @@ inline constexpr std::size_t lane = 32;
   std::size_t done = 0;
   if !consteval {
     while (done + lane <= text.size()) {
-      const bytes32 chunk = load32(text.data() + done);
+      bytes32 chunk;
+      load32(chunk, text.data() + done);
       const std::uint32_t stop =
           mask_of(chunk < static_cast<unsigned char>(0x20)) |
           mask_of(chunk == static_cast<unsigned char>('"')) |
@@ -305,8 +305,10 @@ inline bool has_ssse3() {
     // again below a character at a time, to say how far it is right.
     // ASCII first, 32 bytes at a time: most text is, and it needs no more.
     std::size_t ascii = 0;
-    while (ascii + lane <= text.size() &&
-           mask_of(load32(text.data() + ascii) >= static_cast<unsigned char>(0x80)) == 0) {
+    while (ascii + lane <= text.size()) {
+      bytes32 chunk;
+      load32(chunk, text.data() + ascii);
+      if (mask_of(chunk >= static_cast<unsigned char>(0x80)) != 0) break;
       ascii += lane;
     }
     while (ascii != text.size() && static_cast<unsigned char>(text[ascii]) < 0x80) ++ascii;
@@ -322,7 +324,8 @@ inline bool has_ssse3() {
   while (done != text.size()) {
     if !consteval {
       if (done + lane <= text.size()) {
-        const bytes32 chunk = load32(text.data() + done);
+        bytes32 chunk;
+        load32(chunk, text.data() + done);
         if (mask_of(chunk >= static_cast<unsigned char>(0x80)) == 0) {
           done += lane;
           continue;
@@ -382,7 +385,8 @@ inline bool has_ssse3() {
   if (text.empty() || !space_byte(static_cast<unsigned char>(text[0]))) return 0;
   if !consteval {
     while (done + lane <= text.size()) {
-      const bytes32 chunk = load32(text.data() + done);
+      bytes32 chunk;
+      load32(chunk, text.data() + done);
       const std::uint32_t white =
           mask_of(chunk == static_cast<unsigned char>(' ')) |
           mask_of(chunk == static_cast<unsigned char>('\n')) |
