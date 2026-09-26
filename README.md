@@ -59,6 +59,7 @@ consteval auto json_schema(knot::type<content>) {
 | a described type | an object |
 | `knot::value` | anything |
 | `knot::by<"key", A, B, …>` | one of several, chosen by a sibling key |
+| `knot::value` said with `.member<"extra">(knot::rest)` | every key the type does not describe, written back in its place |
 
 ## Reading
 
@@ -187,9 +188,10 @@ Besides a test a case, two tests made up at random:
 
 Both run clean under AddressSanitizer and UndefinedBehaviorSanitizer.
 
-A plain typed value does not keep a `null` for an optional member: it reads as
-empty and is written as no key. Inside a `knot::by` the null is kept, with the
-other keys, and written back.
+A plain typed value passes over the keys it does not describe, unless it has
+a member for the rest of them; and it does not keep a `null` for an optional
+member, which reads as empty and is written as no key. Inside a `knot::by`
+both are kept and written back.
 
 ## Building
 
