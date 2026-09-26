@@ -652,6 +652,22 @@ constexpr bool ordinary_number(Cursor& in, bool& negative,
   if (in.peek() == '0') {
     in.next();
   } else {
+    // Most numbers are plain integers: taken as they come, and the digits
+    // spelled out only where a fraction or an exponent follows.
+    std::array<char, 17> kept{};
+    std::size_t count = 0;
+    std::int64_t quick = 0;
+    while (digit() && count != kept.size()) {
+      kept[count++] = static_cast<char>(in.peek());
+      quick = quick * 10 + (in.peek() - '0');
+      in.next();
+    }
+    if (count != kept.size() && in.peek() != '.' && in.peek() != 'e' && in.peek() != 'E') {
+      if (quick > most_integer) return in.fail_at(range, start);
+      magnitude = quick;
+      return true;
+    }
+    digits.assign(kept.data(), count);
     while (digit()) {
       digits += static_cast<char>(in.peek());
       in.next();
