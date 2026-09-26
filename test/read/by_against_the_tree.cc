@@ -1,7 +1,7 @@
-// knot::by against the plain way, on events made up at random: the content
+// knot::tagged against the plain way, on events made up at random: the content
 // read into a tree and then typed by its tag. The two must agree on which
 // alternative it is and on its fields -- and written back as Canonical JSON
-// they must be the same text, since knot::by keeps what it did not type.
+// they must be the same text, since knot::tagged keeps what it did not type.
 import std;
 import knot;
 import gtest;
@@ -47,7 +47,7 @@ consteval auto json_schema(knot::type<rich>) {
 
 struct typed_event {
   std::string type;
-  knot::by<"type", message, member, rich, knot::value> content;
+  knot::tagged<"type", message, member, rich, knot::value> content;
   std::string event_id;
 };
 consteval auto json_schema(knot::type<typed_event>) { return knot::schema<typed_event>(); }

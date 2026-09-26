@@ -1,4 +1,4 @@
-// knot::by against the plain way: the content always read into a tree, then
+// knot::tagged against the plain way: the content always read into a tree, then
 // made the type its tag names. Text in memory, many times over; nanoseconds
 // and allocations an event.
 import std;
@@ -39,7 +39,7 @@ consteval auto json_schema(knot::type<member>) {
 // The way this library reads it.
 struct room_event {
   std::string type;
-  knot::by<"type", message, member, knot::value> content;
+  knot::tagged<"type", message, member, knot::value> content;
   std::string event_id;
 };
 consteval auto json_schema(knot::type<room_event>) {

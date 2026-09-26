@@ -17,7 +17,7 @@ consteval auto json_schema(knot::type<message>) {
 
 struct room_event {
   std::string type;
-  knot::by<"type", message, knot::value> content;
+  knot::tagged<"type", message, knot::value> content;
   std::string event_id;
   std::optional<std::int64_t> origin_server_ts;
 };
@@ -44,7 +44,7 @@ chevron's types do. Its members are its keys, named as the members are:
 consteval auto json_schema(knot::type<content>) {
   return knot::schema<content>()
       .member<"relates_to">(knot::key("m.relates_to"))  // a key that is no C++ name
-      .tag("org.example.content");                      // for knot::by, below
+      .tag("org.example.content");                      // for knot::tagged, below
 }
 ```
 
@@ -58,7 +58,7 @@ consteval auto json_schema(knot::type<content>) {
 | `std::map<std::string, T>`, `std::flat_map<std::string, T>` | an object whose keys are the data |
 | a described type | an object |
 | `knot::value` | anything |
-| `knot::by<"key", A, B, …>` | one of several, chosen by a sibling key |
+| `knot::tagged<"key", A, B, …>` | one of several, chosen by a sibling key |
 | `knot::value` said with `.member<"extra">(knot::rest)` | every key the type does not describe, written back in its place |
 
 ## Reading
@@ -85,10 +85,10 @@ In both, a key the type does not have is passed over, a key twice is refused,
 text that is not UTF-8 is refused, and nesting in what is passed over stops at
 128.
 
-## Content chosen by a key: `knot::by`
+## Content chosen by a key: `knot::tagged`
 
 ```cpp
-knot::by<"type", message, member, knot::value> content;
+knot::tagged<"type", message, member, knot::value> content;
 content.is<message>();  content.as<message>();  content.data();  // a std::variant
 content.unknown;        // what the content had that the alternative does not
 ```
@@ -106,7 +106,7 @@ Only one value is ever made, whichever order `"type"` and the content come in:
   moved across member by member where it was read into another, from the tree
   where it turned -- or stays a tree where the named one does not fit.
 
-Written again, a `knot::by` writes its kept keys back: an event read and
+Written again, a `knot::tagged` writes its kept keys back: an event read and
 written loses nothing.
 
 ## `knot::value`
@@ -146,10 +146,10 @@ checked as UTF-8 16 bytes at a time with simdjson's lookup method (SSSE3,
 chosen at run time); white space is skipped the same way.
 
 `test/bench/by.cc`, one core, best of five rounds, nanoseconds an event and
-allocations -- `knot::by` against reading the content into a tree and then
+allocations -- `knot::tagged` against reading the content into a tree and then
 typing it:
 
-| case | knot::by | allocs | tree, then type | allocs |
+| case | knot::tagged | allocs | tree, then type | allocs |
 | --- | ---: | ---: | ---: | ---: |
 | message, type first | 159 | 1 | 244 | 6 |
 | message, type last | 149 | 1 | 176 | 3 |
@@ -166,7 +166,7 @@ events of five kinds written type last, with keys nobody here describes:
 
 | | MB/s | allocations an event |
 | --- | ---: | ---: |
-| read typed, `knot::by` | 682 | 3.5 |
+| read typed, `knot::tagged` | 682 | 3.5 |
 | read typed, Canonical JSON | 796 | 3.5 |
 | read whole, as a `knot::value` | 400 | 14.2 |
 | written, `knot::to_json_string` | 1001 | 2.8 |
@@ -182,7 +182,7 @@ Besides a test a case, two tests made up at random:
   read back strictly, then broken a byte at a time -- which may fail to read
   and must do nothing worse;
 - `read/by_against_the_tree`: 20000 events with tags known and unknown and
-  content of every shape, read through `knot::by` and read as a tree typed
+  content of every shape, read through `knot::tagged` and read as a tree typed
   afterwards, which must agree and write the same Canonical JSON; read from
   pieces a character at a time, and as Canonical JSON strictly, as well.
 
@@ -190,7 +190,7 @@ Both run clean under AddressSanitizer and UndefinedBehaviorSanitizer.
 
 A plain typed value passes over the keys it does not describe, unless it has
 a member for the rest of them; and it does not keep a `null` for an optional
-member, which reads as empty and is written as no key. Inside a `knot::by`
+member, which reads as empty and is written as no key. Inside a `knot::tagged`
 both are kept and written back.
 
 ## Building

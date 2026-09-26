@@ -27,7 +27,7 @@ consteval auto json_schema(knot::type<member>) {
 
 struct room_event {
   std::string type;
-  knot::by<"type", message, member, knot::value> content;
+  knot::tagged<"type", message, member, knot::value> content;
   std::string event_id;
   friend bool operator==(const room_event&, const room_event&) = default;
 };
@@ -38,7 +38,7 @@ consteval auto json_schema(knot::type<room_event>) {
 // No fallback: a type nobody names is an error.
 struct strict_event {
   std::string type;
-  knot::by<"type", message, member> content;
+  knot::tagged<"type", message, member> content;
 };
 consteval auto json_schema(knot::type<strict_event>) {
   return knot::schema<strict_event>();

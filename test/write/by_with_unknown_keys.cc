@@ -17,7 +17,7 @@ consteval auto json_schema(knot::type<message>) {
 
 struct room_event {
   std::string type;
-  knot::by<"type", message, knot::value> content;
+  knot::tagged<"type", message, knot::value> content;
   std::string event_id;
 };
 consteval auto json_schema(knot::type<room_event>) {

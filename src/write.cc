@@ -343,7 +343,7 @@ class owned_frame final : public frame {
 template <class Type>
 constexpr std::unique_ptr<frame> frame_for(const Type& value) {
   if constexpr (requires { value.reading; value.data(); }) {
-    // A knot::by: the alternative it holds -- with what it did not have laid
+    // A knot::tagged: the alternative it holds -- with what it did not have laid
     // back in, where there is any.
     if (!value.unknown.is_null()) return std::make_unique<owned_frame>(as_tree(value));
     return std::visit([](const auto& held) { return frame_for(held); },

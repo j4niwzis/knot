@@ -1,6 +1,6 @@
 // A /sync response, the shape a client reads most: rooms, their timelines,
 // events of several types, most of them with keys nobody here describes.
-// Read typed with knot::by, and read whole as a knot::value; megabytes a
+// Read typed with knot::tagged, and read whole as a knot::value; megabytes a
 // second and allocations an event.
 import std;
 import knot;
@@ -68,7 +68,7 @@ struct event {
   std::string sender;
   std::int64_t origin_server_ts = 0;
   std::optional<unsigned_data> unsigned_;
-  knot::by<"type", message, member, reaction, knot::value> content;
+  knot::tagged<"type", message, member, reaction, knot::value> content;
 };
 consteval auto json_schema(knot::type<event>) {
   return knot::schema<event>().member<"unsigned_">(knot::key("unsigned"));
@@ -213,9 +213,9 @@ int main() {
   });
   std::println("a /sync of {:.2f} MB, 1000 events, {} of them typed", megabytes, typed);
   std::println("{:<22} {:>10} {:>14}", "", "MB/s", "allocs/event");
-  std::println("{:<22} {:>10.0f} {:>14.1f}", "knot::by, typed", megabytes / by.first,
+  std::println("{:<22} {:>10.0f} {:>14.1f}", "knot::tagged, typed", megabytes / by.first,
                double(by.second) / 1000);
-  std::println("{:<22} {:>10.0f} {:>14.1f}", "knot::by, canonical",
+  std::println("{:<22} {:>10.0f} {:>14.1f}", "knot::tagged, canonical",
                double(canonical.size()) / 1e6 / strict.first, double(strict.second) / 1000);
   std::println("{:<22} {:>10.0f} {:>14.1f}", "to_json_string",
                double(canonical.size()) / 1e6 / eager.first, double(eager.second) / 1000);

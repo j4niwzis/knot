@@ -862,7 +862,7 @@ constexpr bool read_value(Cursor& in, Type& out);
 template <class Type>
 struct is_by : std::false_type {};
 template <name Tag, class... Alternatives>
-struct is_by<by<Tag, Alternatives...>> : std::true_type {};
+struct is_by<tagged<Tag, Alternatives...>> : std::true_type {};
 
 template <class Alternative>
 constexpr std::string_view tag_of() {
@@ -878,7 +878,7 @@ constexpr std::string_view tag_of() {
 template <class By>
 struct by_alternatives;
 template <name Tag, class... Alternatives>
-struct by_alternatives<by<Tag, Alternatives...>> {
+struct by_alternatives<tagged<Tag, Alternatives...>> {
   static constexpr std::size_t count = sizeof...(Alternatives);
   static constexpr std::size_t fallback = [] {
     std::size_t found = std::variant_npos;
@@ -998,7 +998,7 @@ constexpr std::size_t rank_of(std::string_view key,
   return found;
 }
 
-// A member, where a knot::by among them is told its tag if the tag came first.
+// A member, where a knot::tagged among them is told its tag if the tag came first.
 template <bool Canonical, class Type, std::size_t Rank, class Cursor, std::size_t Size>
 constexpr bool read_member(Cursor& in, Type& out, const std::array<bool, Size>& seen) {
   auto& member = boost::pfr::get<order_of<Type>[Rank]>(out);
@@ -1006,7 +1006,7 @@ constexpr bool read_member(Cursor& in, Type& out, const std::array<bool, Size>& 
   if constexpr (is_by<member_type>::value) {
     constexpr std::size_t tag =
         rank_of<Type>(member_type::tag_key, std::make_index_sequence<Size>{});
-    static_assert(tag != Size, "knot: a knot::by is chosen by a key its type does not have");
+    static_assert(tag != Size, "knot: a knot::tagged is chosen by a key its type does not have");
     member.reading = {};
     if (seen[tag]) {
       member.reading.chosen = by_alternatives<member_type>::named(
@@ -1018,7 +1018,7 @@ constexpr bool read_member(Cursor& in, Type& out, const std::array<bool, Size>& 
   }
 }
 
-// After the object: each knot::by made what its tag names.
+// After the object: each knot::tagged made what its tag names.
 template <class Type, std::size_t Rank, std::size_t Size>
 constexpr bool settle_member(Type& out, const std::array<bool, Size>& seen) {
   auto& member = boost::pfr::get<order_of<Type>[Rank]>(out);
@@ -1612,7 +1612,7 @@ constexpr bool rest_of_object(Cursor& in, value::object& members,
 // Keys a type does not have, kept on the side.
 //
 // Where the reading may yet have to give the content back whole -- the
-// content of a knot::by, before its tag has decided -- a key the type does not
+// content of a knot::tagged, before its tag has decided -- a key the type does not
 // have does not end the typed reading: it is kept in an overlay, a tree shaped
 // like the content that holds only what the typed value does not. For a
 // member the type does have, the overlay holds that member's own overlay; for
@@ -1987,7 +1987,7 @@ constexpr went read_or_tree(Cursor& in, Type& out, value& tree, value* extras) {
 }
 
 // ---------------------------------------------------------------------------
-// knot::by: the content read into one alternative, the tag deciding.
+// knot::tagged: the content read into one alternative, the tag deciding.
 
 // Which alternative a first key points to, where the tag has not come yet:
 // the first typed one that has such a key, or else the knot::value there is
@@ -2011,12 +2011,12 @@ struct guess_of {
            ...);
     if (found != std::variant_npos) return found;
     constexpr std::size_t fallback =
-        by_alternatives<by<Tag, Alternatives...>>::fallback;
+        by_alternatives<tagged<Tag, Alternatives...>>::fallback;
     return fallback != std::variant_npos ? fallback : 0;
   }
 };
 template <name Tag, class... Alternatives>
-constexpr std::size_t guessed(const by<Tag, Alternatives...>*, std::string_view key) {
+constexpr std::size_t guessed(const tagged<Tag, Alternatives...>*, std::string_view key) {
   return guess_of<Tag, Alternatives...>::by_key(key);
 }
 
@@ -2366,7 +2366,7 @@ constexpr std::expected<Type, error> read(Range&& text) {
                                          std::ranges::end(text));
 }
 
-// The content of a knot::by whole, as a tree: the alternative it holds with
+// The content of a knot::tagged whole, as a tree: the alternative it holds with
 // what it did not have laid back in -- what is written, so that an event read
 // is written back with nothing lost.
 template <class By>

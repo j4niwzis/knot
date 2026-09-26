@@ -76,22 +76,22 @@ class value {
 //   }
 //   struct room_event {
 //     std::string type;
-//     knot::by<"type", message, member, knot::value> content;
+//     knot::tagged<"type", message, member, knot::value> content;
 //   };
 //
 // Each alternative says its tag in its own schema; knot::value last takes what
 // no tag names, and what a named alternative does not fit. Only one of them is
 // ever made while reading, whichever order "type" and the content come in.
 template <name Tag, class... Alternatives>
-class by {
+class tagged {
  public:
   using variant = std::variant<Alternatives...>;
   static constexpr std::string_view tag_key = Tag.view();
 
-  constexpr by() = default;
+  constexpr tagged() = default;
   template <class Alternative>
     requires(std::same_as<std::remove_cvref_t<Alternative>, Alternatives> || ...)
-  constexpr by(Alternative&& held) : held_(std::forward<Alternative>(held)) {}
+  constexpr tagged(Alternative&& held) : held_(std::forward<Alternative>(held)) {}
 
   [[nodiscard]] constexpr const variant& data() const& { return held_; }
   [[nodiscard]] constexpr variant& data() & { return held_; }
@@ -104,7 +104,7 @@ class by {
     return std::get<Alternative>(held_);
   }
 
-  friend constexpr bool operator==(const by& one, const by& other) {
+  friend constexpr bool operator==(const tagged& one, const tagged& other) {
     return one.held_ == other.held_;
   }
 

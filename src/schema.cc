@@ -83,7 +83,7 @@ class schema {
   // there is none.
   [[nodiscard]] constexpr std::size_t rest_member() const { return rest_; }
 
-  // What names this type where a knot::by chooses among several: the value of
+  // What names this type where a knot::tagged chooses among several: the value of
   // the sibling key it is chosen by, "m.room.message" for a message.
   [[nodiscard]] consteval schema tag(std::string_view said) const {
     schema made = *this;
