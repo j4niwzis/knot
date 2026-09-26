@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 4.3.4 FATAL_ERROR)
 
-# knot: Canonical JSON for Matrix, as C++23 modules -- a type's JSON read into
+# knot: Canonical JSON for Matrix, as C++26 modules -- a type's JSON read into
 # the type by a reader derived from the type while the program is compiled.
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/import-std.cmake)
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 project(knot VERSION 0.1 LANGUAGES CXX)
@@ -30,7 +30,7 @@ function(knot_module target file)
   add_library(${target})
   target_sources(${target}
     PUBLIC FILE_SET CXX_MODULES BASE_DIRS src FILES ${file})
-  target_compile_features(${target} PUBLIC cxx_std_23)
+  target_compile_features(${target} PUBLIC cxx_std_26)
   target_link_libraries(${target} PUBLIC ${ARGN})
   target_compile_options(${target} PUBLIC
     $<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang>:-fconstexpr-steps=${KNOT_CONSTEXPR_STEPS}>)

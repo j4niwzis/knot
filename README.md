@@ -1,6 +1,6 @@
 # knot
 
-JSON for Matrix, as C++23 modules: ordinary JSON and Canonical JSON read
+JSON for Matrix, as C++26 modules: ordinary JSON and Canonical JSON read
 straight into your types, and your types written as Canonical JSON.
 
 ```cpp
