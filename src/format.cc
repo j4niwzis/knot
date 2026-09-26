@@ -355,51 +355,67 @@ consteval auto freeze() {
   return made;
 }
 
+// What is frozen, made by functions with names: a lambda is local to the
+// file it is written in, and one in the initializer of an exported variable
+// is that file's local entity exposed to every importer (clang warns
+// -WTU-local-entity-exposure; the standard makes it ill-formed).
+
 // An array read by a fold: each element a group.
 template <class Element>
-inline constexpr auto array_groups = freeze<[] {
+constexpr std::string array_groups_text() {
   std::string out;
   append_array<Element>(out, true);
   return out;
-}>();
+}
+template <class Element>
+inline constexpr auto array_groups = freeze<array_groups_text<Element>>();
 
 // The key of a member as it is written, quotes, colon and all: "content":
 template <class Type, std::size_t Rank>
-inline constexpr auto key_literal = freeze<[] {
+constexpr std::string key_literal_text() {
   std::string out;
   append_json_string(out, schema_of<Type>.key_of(order_of<Type>[Rank]));
   out += ':';
   return out;
-}>();
+}
+template <class Type, std::size_t Rank>
+inline constexpr auto key_literal = freeze<key_literal_text<Type, Rank>>();
 
 // Whether the member of each rank has to be there: all but the optional ones,
 // and the one the rest of the keys go to.
-template <class Type>
-inline constexpr auto required_at = []<std::size_t... Rank>(
-                                        std::index_sequence<Rank...>) {
+template <class Type, std::size_t... Rank>
+consteval auto required_at_of(std::index_sequence<Rank...>) {
   return std::array<bool, sizeof...(Rank)>{
       (!is_optional<field_t<Type, order_of<Type>[Rank]>>::value &&
        order_of<Type>[Rank] != schema_of<Type>.rest_member())...};
-}(std::make_index_sequence<schema<Type>::size>{});
+}
+template <class Type>
+inline constexpr auto required_at = required_at_of<Type>(std::make_index_sequence<schema<Type>::size>{});
 
 // Whether a type keeps the rest of its keys, and where.
 template <class Type>
 inline constexpr bool keeps_rest = schema_of<Type>.rest_member() != schema<Type>::size;
 
+template <class Type>
+constexpr std::string scan_format_text() {
+  std::string out;
+  append_object<Type>(out, true);
+  return out;
+}
+
+template <class Type>
+constexpr std::string pattern_text() {
+  std::string out;
+  append_pattern<Type>(out);
+  return out;
+}
+
 }  // namespace detail
 
 template <described Type>
-inline constexpr auto scan_format = detail::freeze<[] {
-  std::string out;
-  detail::append_object<Type>(out, true);
-  return out;
-}>();
+inline constexpr auto scan_format = detail::freeze<detail::scan_format_text<Type>>();
 
 template <class Type>
-inline constexpr auto pattern = detail::freeze<[] {
-  std::string out;
-  detail::append_pattern<Type>(out);
-  return out;
-}>();
+inline constexpr auto pattern = detail::freeze<detail::pattern_text<Type>>();
 
 }  // namespace knot
