@@ -453,7 +453,7 @@ export namespace knot {
 // A value as Canonical JSON, lazily: a view of its characters, made as they
 // are pulled. A value given as an rvalue is kept by the view; one given as an
 // lvalue is referred to, and has to outlive it.
-template <described Type>
+template <document Type>
 class json_view : public std::ranges::view_interface<json_view<Type>> {
  public:
   class iterator {
@@ -559,7 +559,7 @@ class json_view : public std::ranges::view_interface<json_view<Type>> {
 };
 
 template <class Type>
-  requires described<std::remove_cvref_t<Type>>
+  requires document<std::remove_cvref_t<Type>>
 constexpr json_view<std::remove_cvref_t<Type>> to_json(Type&& value) {
   return json_view<std::remove_cvref_t<Type>>(std::forward<Type>(value));
 }
@@ -694,13 +694,13 @@ export namespace knot {
 // A value as Canonical JSON, added to the end of a string at once: no view
 // and no pieces, for where the whole is wanted anyway.
 template <class Type>
-  requires described<std::remove_cvref_t<Type>>
+  requires document<std::remove_cvref_t<Type>>
 constexpr void write(std::string& out, const Type& value) {
   detail::eager::put(out, value);
 }
 
 template <class Type>
-  requires described<std::remove_cvref_t<Type>>
+  requires document<std::remove_cvref_t<Type>>
 constexpr std::string to_json_string(const Type& value) {
   std::string out;
   write(out, value);

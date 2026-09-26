@@ -1267,6 +1267,187 @@ constexpr bool read_map(Cursor& in, Map& out) {
 // A number in a value. In Canonical JSON an integer and nothing else; in
 // ordinary JSON a whole number within 2^53 is an integer, and anything else a
 // double -- the text checked against JSON's grammar first, then converted.
+// A decimal number as the nearest double -- ties to even -- worked out
+// exactly, with integers as long as they need to be: what std::from_chars
+// gives, where it cannot be used, while the compiler evaluates. Nothing
+// where it is too large for a double. The text is a JSON number.
+namespace exact {
+
+// An unsigned integer of any length: 32-bit limbs, the lowest first, no
+// zero limb on top.
+using big = std::vector<std::uint32_t>;
+
+constexpr void trim(big& n) {
+  while (!n.empty() && n.back() == 0) n.pop_back();
+}
+
+constexpr void multiply_add(big& n, std::uint32_t by, std::uint32_t add) {
+  std::uint64_t carry = add;
+  for (auto& limb : n) {
+    const std::uint64_t made = std::uint64_t(limb) * by + carry;
+    limb = static_cast<std::uint32_t>(made);
+    carry = made >> 32;
+  }
+  if (carry) n.push_back(static_cast<std::uint32_t>(carry));
+}
+
+constexpr std::size_t bits(const big& n) {
+  if (n.empty()) return 0;
+  return (n.size() - 1) * 32 + std::bit_width(n.back());
+}
+
+constexpr bool bit(const big& n, std::size_t at) {
+  const std::size_t limb = at / 32;
+  return limb < n.size() && ((n[limb] >> (at % 32)) & 1u);
+}
+
+// Whether any bit below at is set.
+constexpr bool any_below(const big& n, std::size_t at) {
+  const std::size_t whole = std::min(at / 32, n.size());
+  for (std::size_t i = 0; i < whole; ++i)
+    if (n[i]) return true;
+  if (whole < n.size() && at % 32) return (n[whole] & ((1u << (at % 32)) - 1)) != 0;
+  return false;
+}
+
+constexpr void shift_left_one(big& n) {
+  std::uint32_t carry = 0;
+  for (auto& limb : n) {
+    const std::uint32_t next = limb >> 31;
+    limb = (limb << 1) | carry;
+    carry = next;
+  }
+  if (carry) n.push_back(carry);
+}
+
+constexpr bool less(const big& a, const big& b) {
+  if (a.size() != b.size()) return a.size() < b.size();
+  for (std::size_t i = a.size(); i-- > 0;)
+    if (a[i] != b[i]) return a[i] < b[i];
+  return false;
+}
+
+constexpr void subtract(big& a, const big& b) {
+  std::int64_t borrow = 0;
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    std::int64_t made = std::int64_t(a[i]) - borrow - (i < b.size() ? std::int64_t(b[i]) : 0);
+    borrow = made < 0;
+    if (made < 0) made += std::int64_t(1) << 32;
+    a[i] = static_cast<std::uint32_t>(made);
+  }
+  trim(a);
+}
+
+// (n << shift) / d, and whether anything was left over: long division, a bit
+// at a time.
+constexpr big divide(const big& n, std::size_t shift, const big& d, bool& inexact) {
+  const std::size_t total = bits(n) + shift;
+  big quotient((total + 31) / 32, 0);
+  big rest;
+  for (std::size_t at = total; at-- > 0;) {
+    shift_left_one(rest);
+    if (at >= shift && bit(n, at - shift)) {
+      if (rest.empty()) rest.push_back(0);
+      rest[0] |= 1u;
+    }
+    if (!less(rest, d)) {
+      subtract(rest, d);
+      quotient[at / 32] |= 1u << (at % 32);
+    }
+  }
+  trim(quotient);
+  inexact = !rest.empty();
+  return quotient;
+}
+
+// q times two to the -k, a little more where sticky, as the nearest double.
+constexpr std::optional<double> nearest(const big& q, std::int64_t k, bool sticky, bool negative) {
+  const std::int64_t length = static_cast<std::int64_t>(bits(q));
+  const std::int64_t exponent = length - 1 - k;  // of the highest bit
+  if (exponent > 1023) return std::nullopt;
+  const std::int64_t precision = exponent >= -1022 ? 53 : 53 - (-1022 - exponent);
+  std::uint64_t mantissa = 0;
+  if (precision >= 0) {
+    const std::int64_t drop = length - precision;
+    if (drop <= 0) {
+      for (std::int64_t at = length; at-- > 0;)
+        mantissa = (mantissa << 1) | (bit(q, static_cast<std::size_t>(at)) ? 1 : 0);
+      mantissa <<= -drop;
+    } else {
+      for (std::int64_t at = length; at-- > drop;)
+        mantissa = (mantissa << 1) | (bit(q, static_cast<std::size_t>(at)) ? 1 : 0);
+      const bool half = bit(q, static_cast<std::size_t>(drop - 1));
+      const bool rest = sticky || any_below(q, static_cast<std::size_t>(drop - 1));
+      if (half && (rest || (mantissa & 1))) ++mantissa;
+    }
+  }
+  std::uint64_t pattern = 0;
+  if (exponent >= -1022) {
+    std::int64_t biased = exponent + 1023;
+    if (mantissa == (std::uint64_t(1) << 53)) {
+      mantissa >>= 1;
+      ++biased;
+    }
+    if (biased >= 2047) return std::nullopt;
+    pattern = (std::uint64_t(biased) << 52) | (mantissa & ((std::uint64_t(1) << 52) - 1));
+  } else {
+    pattern = mantissa;  // a subnormal; rounded up to 2^52, the least normal
+  }
+  if (negative) pattern |= std::uint64_t(1) << 63;
+  return std::bit_cast<double>(pattern);
+}
+
+constexpr std::optional<double> parse(std::string_view text) {
+  bool negative = false;
+  std::size_t at = 0;
+  if (at < text.size() && text[at] == '-') {
+    negative = true;
+    ++at;
+  }
+  big digits;
+  std::int64_t exponent = 0;
+  std::size_t significant = 0;
+  const auto take = [&](char digit) {
+    if (digits.empty() && digit == '0') return;
+    multiply_add(digits, 10, static_cast<std::uint32_t>(digit - '0'));
+    ++significant;
+  };
+  for (; at < text.size() && text[at] >= '0' && text[at] <= '9'; ++at) take(text[at]);
+  if (at < text.size() && text[at] == '.') {
+    for (++at; at < text.size() && text[at] >= '0' && text[at] <= '9'; ++at) {
+      take(text[at]);
+      --exponent;
+    }
+  }
+  if (at < text.size() && (text[at] == 'e' || text[at] == 'E')) {
+    ++at;
+    bool down = false;
+    if (text[at] == '+' || text[at] == '-') down = text[at++] == '-';
+    std::int64_t written = 0;
+    for (; at < text.size(); ++at)
+      written = std::min<std::int64_t>(written * 10 + (text[at] - '0'), 100000);
+    exponent += down ? -written : written;
+  }
+  if (digits.empty()) return negative ? -0.0 : 0.0;
+  const std::int64_t magnitude = static_cast<std::int64_t>(significant) + exponent;  // of the leading digit, +1
+  if (magnitude > 310) return std::nullopt;
+  if (magnitude < -330) return negative ? -0.0 : 0.0;
+  if (exponent >= 0) {
+    for (std::int64_t i = 0; i < exponent; ++i) multiply_add(digits, 10, 0);
+    return nearest(digits, 0, false, negative);
+  }
+  big divisor{1};
+  for (std::int64_t i = 0; i < -exponent; ++i) multiply_add(divisor, 10, 0);
+  // Enough bits in the quotient for 53 of them, the halfway bit and more.
+  const std::int64_t shift = std::max<std::int64_t>(
+      0, 56 + static_cast<std::int64_t>(bits(divisor)) - static_cast<std::int64_t>(bits(digits)));
+  bool inexact = false;
+  const big quotient = divide(digits, static_cast<std::size_t>(shift), divisor, inexact);
+  return nearest(quotient, shift, inexact, negative);
+}
+
+}  // namespace exact
+
 template <bool Canonical, class Cursor>
 constexpr bool read_any_number(Cursor& in, value& out) {
   bool negative = false;
@@ -1308,13 +1489,33 @@ constexpr bool read_any_number(Cursor& in, value& out) {
       return true;
     }
     double number = 0;
-    const auto made = std::from_chars(text.data(), text.data() + text.size(), number);
-    if (made.ec != std::errc{} || !std::isfinite(number)) {
-      return in.fail_at("knot: a number too large", start);
+    if consteval {
+      const auto made = exact::parse(text);
+      if (!made) return in.fail_at("knot: a number too large", start);
+      number = *made;
+    } else {
+      const auto made = std::from_chars(text.data(), text.data() + text.size(), number);
+      if (made.ec == std::errc::result_out_of_range) {
+        // Too small for a double is zero, as the exact reading says; too
+        // large is refused, at run time as while the compiler evaluates.
+        const auto exactly = exact::parse(text);
+        if (!exactly) return in.fail_at("knot: a number too large", start);
+        number = *exactly;
+      } else if (made.ec != std::errc{} || !std::isfinite(number)) {
+        return in.fail_at("knot: a number too large", start);
+      }
     }
     out = number;
     return true;
   }
+}
+
+// A number read as a double: a whole one is read as an integer, which has
+// no -0, so the sign written says which zero it is.
+constexpr double as_double(const value& number, bool minus) {
+  if (const auto* whole = std::get_if<std::int64_t>(&number.data()))
+    return *whole == 0 && minus ? -0.0 : static_cast<double>(*whole);
+  return std::get<double>(number.data());
 }
 
 // Any JSON, into a value: the nesting bounded here, since no type bounds it.
@@ -1427,6 +1628,8 @@ constexpr value to_tree(Type&& made) {
     return value(std::move(made));
   } else if constexpr (json_integer<plain>) {
     return value(static_cast<std::int64_t>(made));
+  } else if constexpr (std::same_as<plain, double>) {
+    return value(made);
   } else if constexpr (is_choice<plain>::value) {
     return value(std::string(choice<plain>::name(made)));
   } else if constexpr (is_optional<plain>::value) {
@@ -1465,6 +1668,8 @@ constexpr bool tree_fits(const value& tree) {
   } else if constexpr (json_integer<Type>) {
     const auto* one = std::get_if<std::int64_t>(&held);
     return one && std::in_range<Type>(*one);
+  } else if constexpr (std::same_as<Type, double>) {
+    return std::holds_alternative<double>(held) || std::holds_alternative<std::int64_t>(held);
   } else if constexpr (is_choice<Type>::value) {
     const auto* one = std::get_if<std::string>(&held);
     return one && (choice<Type>::open || choice<Type>::find(*one) != choice<Type>::count);
@@ -1546,6 +1751,15 @@ constexpr bool from_tree(value& tree, Type& out) {
     auto* one = std::get_if<std::int64_t>(&held);
     if (!one || !std::in_range<Type>(*one)) return false;
     out = static_cast<Type>(*one);
+    return true;
+  } else if constexpr (std::same_as<Type, double>) {
+    if (const auto* whole = std::get_if<std::int64_t>(&held)) {
+      out = static_cast<double>(*whole);
+      return true;
+    }
+    const auto* one = std::get_if<double>(&held);
+    if (!one) return false;
+    out = *one;
     return true;
   } else if constexpr (is_choice<Type>::value) {
     auto* one = std::get_if<std::string>(&held);
@@ -1985,6 +2199,15 @@ constexpr went read_or_tree(Cursor& in, Type& out, value& tree, value* extras) {
     }
     tree = std::move(number);
     return went::tree;
+  } else if constexpr (std::same_as<Type, double>) {
+    if (in.peek() != '-' && (in.peek() < '0' || in.peek() > '9')) {
+      return all_tree<Canonical>(in, tree);
+    }
+    const bool minus = in.peek() == '-';
+    value number;
+    if (!read_any_number<Canonical>(in, number)) return went::failed;
+    out = as_double(number, minus);
+    return went::fit;
   } else if constexpr (is_choice<Type>::value) {
     // A string no alternative is, where none keeps it: a tree, as a number
     // too big for its member is.
@@ -2333,6 +2556,16 @@ constexpr bool read_value(Cursor& in, Type& out) {
     return in.literal("false", "knot: expected true or false");
   } else if constexpr (json_integer<Type>) {
     return read_integer<Canonical>(in, out);
+  } else if constexpr (std::same_as<Type, double>) {
+    // Any JSON number; Canonical JSON has only integers, so there only those.
+    if (in.peek() != '-' && (in.peek() < '0' || in.peek() > '9')) {
+      return in.fail("knot: expected a number");
+    }
+    const bool minus = in.peek() == '-';
+    value number;
+    if (!read_any_number<Canonical>(in, number)) return false;
+    out = as_double(number, minus);
+    return true;
   } else if constexpr (is_choice<Type>::value) {
     const std::size_t start = in.offset();
     std::string text;
@@ -2385,13 +2618,23 @@ concept characters =
 
 export namespace knot {
 
+// What is read or written whole: a described type, a knot::value, or any of
+// what they are made of -- an array, a map, a string, a choice, a number.
+template <class Type>
+concept document =
+    described<Type> || std::same_as<Type, value> || std::same_as<Type, std::string> ||
+    std::same_as<Type, bool> || std::same_as<Type, double> || detail::json_integer<Type> ||
+    detail::is_choice<Type>::value || detail::is_vector<Type>::value ||
+    detail::is_map<Type>::value;
+
+
 // Any JSON, from text in memory or from any input range of characters, read
 // once: a stream, a socket's bytes, a view over pieces.
-template <described Type>
+template <document Type>
 constexpr std::expected<Type, error> try_read(std::string_view text) {
   return detail::read_whole<false, Type>(text.begin(), text.end());
 }
-template <described Type, detail::characters Range>
+template <document Type, detail::characters Range>
 constexpr std::expected<Type, error> try_read(Range&& text) {
   return detail::read_whole<false, Type>(std::ranges::begin(text),
                                          std::ranges::end(text));
@@ -2433,36 +2676,36 @@ constexpr std::optional<Type> from_value(value& tree) {
 }
 
 // Canonical JSON and nothing else: what a signature or a hash is taken over.
-template <described Type>
+template <document Type>
 constexpr std::expected<Type, error> try_read(std::string_view text, canonical_t) {
   return detail::read_whole<true, Type>(text.begin(), text.end());
 }
-template <described Type, detail::characters Range>
+template <document Type, detail::characters Range>
 constexpr std::expected<Type, error> try_read(Range&& text, canonical_t) {
   return detail::read_whole<true, Type>(std::ranges::begin(text),
                                         std::ranges::end(text));
 }
 
 // The same, throwing: the value, or a knot::read_failure.
-template <described Type>
+template <document Type>
 constexpr Type read(std::string_view text) {
   auto got = try_read<Type>(text);
   if (!got) throw read_failure(got.error());
   return std::move(*got);
 }
-template <described Type, detail::characters Range>
+template <document Type, detail::characters Range>
 constexpr Type read(Range&& text) {
   auto got = try_read<Type>(std::forward<Range>(text));
   if (!got) throw read_failure(got.error());
   return std::move(*got);
 }
-template <described Type>
+template <document Type>
 constexpr Type read(std::string_view text, canonical_t) {
   auto got = try_read<Type>(text, canonical);
   if (!got) throw read_failure(got.error());
   return std::move(*got);
 }
-template <described Type, detail::characters Range>
+template <document Type, detail::characters Range>
 constexpr Type read(Range&& text, canonical_t) {
   auto got = try_read<Type>(std::forward<Range>(text), canonical);
   if (!got) throw read_failure(got.error());
