@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // knot.value: any JSON at all, for what no type describes.
 //
 //   struct event { std::string type; knot::value content; };

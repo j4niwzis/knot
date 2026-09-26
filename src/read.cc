@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // knot.read: a described type read out of JSON, ordinary or canonical.
 //
 //   knot::read<event>(text)                   // any JSON (RFC 8259)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // knot: Canonical JSON for Matrix.
 export module knot;
 

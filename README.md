@@ -210,3 +210,10 @@ Clang with `import std`; Boost.PFR as a module, through cmake-everywhere. The
 tests are one executable a case: `test/format` (the generator of scan formats,
 alone), `test/read`, `test/write`, and `test/scan` -- scan alone, on formats of
 the kind knot.format writes -- where `KNOT_SCAN_DIR` names a checkout of scan.
+
+## Licence
+
+GNU Affero General Public License, version 3 only (`AGPL-3.0-only`) -- the
+text is in `LICENSE`. A program that uses this library is a work based on
+it; whoever interacts with such a program over a network is offered its
+source, as the licence's section 13 says.

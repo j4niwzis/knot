@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // knot.format: a described type's Canonical JSON, said as text for scan.
 //
 // Two things come out of a type, both while the program is compiled and both

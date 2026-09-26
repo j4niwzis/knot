@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // knot.schema: what a type is called in JSON.
 //
 // A type opts in the way chevron's types do, by a function found through
