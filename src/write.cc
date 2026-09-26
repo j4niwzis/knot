@@ -74,6 +74,8 @@ constexpr step child_step(const Type& value) {
     return step::whole(static_cast<std::int64_t>(value));
   } else if constexpr (std::same_as<Type, double>) {
     return step::fraction(value);
+  } else if constexpr (is_choice<Type>::value) {
+    return step::string(choice<Type>::name(value));
   } else if constexpr (is_optional<Type>::value) {
     return child_step(*value);
   } else {
@@ -359,6 +361,8 @@ constexpr std::unique_ptr<frame> frame_for(const Type& value) {
     return std::make_unique<piece_frame>(value);
   } else if constexpr (std::same_as<Type, std::string>) {
     return std::make_unique<string_frame>(value);
+  } else if constexpr (is_choice<Type>::value) {
+    return std::make_unique<string_frame>(choice<Type>::name(value));
   } else if constexpr (std::same_as<Type, bool>) {
     return std::make_unique<piece_frame>(value ? std::string_view("true")
                                                : std::string_view("false"));
@@ -626,6 +630,8 @@ constexpr void put(std::string& out, const Type& value) {
     put_number(out, value);
   } else if constexpr (std::same_as<Type, std::string>) {
     put_string(out, value);
+  } else if constexpr (is_choice<Type>::value) {
+    put_string(out, choice<Type>::name(value));
   } else if constexpr (is_optional<Type>::value) {
     put(out, *value);
   } else if constexpr (is_vector<Type>::value) {

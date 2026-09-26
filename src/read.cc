@@ -1427,6 +1427,8 @@ constexpr value to_tree(Type&& made) {
     return value(std::move(made));
   } else if constexpr (json_integer<plain>) {
     return value(static_cast<std::int64_t>(made));
+  } else if constexpr (is_choice<plain>::value) {
+    return value(std::string(choice<plain>::name(made)));
   } else if constexpr (is_optional<plain>::value) {
     if (!made) return value();
     return to_tree(std::move(*made));
@@ -1463,6 +1465,9 @@ constexpr bool tree_fits(const value& tree) {
   } else if constexpr (json_integer<Type>) {
     const auto* one = std::get_if<std::int64_t>(&held);
     return one && std::in_range<Type>(*one);
+  } else if constexpr (is_choice<Type>::value) {
+    const auto* one = std::get_if<std::string>(&held);
+    return one && (choice<Type>::open || choice<Type>::find(*one) != choice<Type>::count);
   } else if constexpr (is_optional<Type>::value) {
     return tree.is_null() || tree_fits<typename Type::value_type>(tree);
   } else if constexpr (is_vector<Type>::value) {
@@ -1542,6 +1547,9 @@ constexpr bool from_tree(value& tree, Type& out) {
     if (!one || !std::in_range<Type>(*one)) return false;
     out = static_cast<Type>(*one);
     return true;
+  } else if constexpr (is_choice<Type>::value) {
+    auto* one = std::get_if<std::string>(&held);
+    return one && choice<Type>::settle(*one, out);
   } else if constexpr (is_optional<Type>::value) {
     if (tree.is_null()) {
       out.reset();
@@ -1977,6 +1985,15 @@ constexpr went read_or_tree(Cursor& in, Type& out, value& tree, value* extras) {
     }
     tree = std::move(number);
     return went::tree;
+  } else if constexpr (is_choice<Type>::value) {
+    // A string no alternative is, where none keeps it: a tree, as a number
+    // too big for its member is.
+    if (in.peek() != '"') return all_tree<Canonical>(in, tree);
+    std::string text;
+    if (!read_string<Canonical>(in, text)) return went::failed;
+    if (choice<Type>::settle(text, out)) return went::fit;
+    tree = value(std::move(text));
+    return went::tree;
   } else if constexpr (is_optional<Type>::value) {
     // null is kept by a tree and not by an optional: so it turns.
     if (in.peek() == 'n') return all_tree<Canonical>(in, tree);
@@ -2316,6 +2333,12 @@ constexpr bool read_value(Cursor& in, Type& out) {
     return in.literal("false", "knot: expected true or false");
   } else if constexpr (json_integer<Type>) {
     return read_integer<Canonical>(in, out);
+  } else if constexpr (is_choice<Type>::value) {
+    const std::size_t start = in.offset();
+    std::string text;
+    if (!read_string<Canonical>(in, text)) return false;
+    return choice<Type>::settle(text, out) ||
+           in.fail_at("knot: a string none of the choice's alternatives is", start);
   } else if constexpr (std::same_as<Type, value>) {
     return read_any<Canonical>(in, out);
   } else if constexpr (is_by<Type>::value) {

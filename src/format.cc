@@ -112,6 +112,102 @@ struct is_optional : std::false_type {};
 template <class Value>
 struct is_optional<std::optional<Value>> : std::true_type {};
 
+// A string that is one of a few: a std::variant of empty types, each saying
+// the string it is --
+//   struct read { static constexpr std::string_view json_value = "m.read"; };
+// -- and last, perhaps, a std::string for any string the others are not.
+template <class Type>
+concept named_string =
+    std::is_class_v<Type> && std::is_empty_v<Type> &&
+    std::default_initializable<Type> && requires {
+      { Type::json_value } -> std::convertible_to<std::string_view>;
+    };
+
+template <class... Alternatives>
+consteval bool choice_shape() {
+  constexpr std::size_t count = sizeof...(Alternatives);
+  if constexpr (count == 0) {
+    return false;
+  } else {
+    constexpr bool open = std::same_as<Alternatives...[count - 1], std::string>;
+    constexpr std::size_t named = count - (open ? 1 : 0);
+    if constexpr (named == 0) {
+      return false;
+    } else {
+      return []<std::size_t... At>(std::index_sequence<At...>) {
+        return (named_string<Alternatives...[At]> && ...);
+      }(std::make_index_sequence<named>{});
+    }
+  }
+}
+
+template <class Type>
+struct is_choice : std::false_type {};
+template <class... Alternatives>
+struct is_choice<std::variant<Alternatives...>>
+    : std::bool_constant<choice_shape<Alternatives...>()> {};
+
+template <class Type>
+struct choice;
+
+template <class... Alternatives>
+struct choice<std::variant<Alternatives...>> {
+  using type = std::variant<Alternatives...>;
+  static constexpr std::size_t count = sizeof...(Alternatives);
+  // Whether a string none of the others is, is kept as it is.
+  static constexpr bool open = std::same_as<Alternatives...[count - 1], std::string>;
+  static constexpr std::size_t named = count - (open ? 1 : 0);
+
+  static constexpr auto names = []<std::size_t... At>(std::index_sequence<At...>) {
+    return std::array<std::string_view, named>{
+        std::string_view(Alternatives...[At]::json_value)...};
+  }(std::make_index_sequence<named>{});
+
+  static consteval bool distinct() {
+    for (std::size_t one = 0; one < named; ++one) {
+      for (std::size_t other = one + 1; other < named; ++other) {
+        if (names[one] == names[other]) return false;
+      }
+    }
+    return true;
+  }
+  static_assert(distinct(), "knot: two alternatives of a choice say one string");
+
+  // The alternative a string names, or count where none does.
+  static constexpr std::size_t find(std::string_view text) {
+    for (std::size_t at = 0; at < named; ++at) {
+      if (names[at] == text) return at;
+    }
+    return count;
+  }
+
+  // The string an alternative is: for the kept one, what was kept.
+  static constexpr std::string_view name(const type& held) {
+    if constexpr (open) {
+      if (held.index() == count - 1) return std::get<count - 1>(held);
+    }
+    return names[held.index()];
+  }
+
+  // The alternative a string names made, or the string kept if the choice is
+  // open; false, with nothing moved, where neither.
+  static constexpr bool settle(std::string& text, type& out) {
+    const std::size_t at = find(text);
+    if (at == count) {
+      if constexpr (open) {
+        out.template emplace<count - 1>(std::move(text));
+        return true;
+      } else {
+        return false;
+      }
+    }
+    [&]<std::size_t... At>(std::index_sequence<At...>) {
+      (void)((at == At ? (out.template emplace<At>(), true) : false) || ...);
+    }(std::make_index_sequence<named>{});
+    return true;
+  }
+};
+
 template <class Type, std::size_t Index>
 using field_t = std::remove_cvref_t<boost::pfr::tuple_element_t<Index, Type>>;
 
@@ -228,6 +324,17 @@ constexpr void append_pattern(std::string& out) {
     out += patterns::boolean;
   } else if constexpr (json_integer<Type>) {
     out += std::is_signed_v<Type> ? patterns::integer : patterns::natural;
+  } else if constexpr (is_choice<Type>::value) {
+    if constexpr (choice<Type>::open) {
+      out += patterns::string;
+    } else {
+      out += "(?:";
+      for (std::size_t at = 0; at < choice<Type>::named; ++at) {
+        if (at != 0) out += '|';
+        append_key(out, choice<Type>::names[at]);
+      }
+      out += ')';
+    }
   } else if constexpr (is_vector<Type>::value) {
     append_array<typename Type::value_type>(out, false);
   } else if constexpr (described<Type>) {
