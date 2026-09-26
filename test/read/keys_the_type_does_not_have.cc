@@ -8,7 +8,7 @@ import gtest;
 namespace {
 
 TEST(ReadBoth, KeysTheTypeDoesNotHaveArePassedOver) {
-  const auto got = knot::read<event>(
+  const auto got = knot::try_read<event>(
       R"({"x":{"a":[1,{"b":null}],"c":-1.5e3},"content":"hi","depth":2,)"
       R"("prev":[],"z":"\u00e9\n"})");
   ASSERT_TRUE(got) << got.error().message << " at " << got.error().offset;

@@ -27,7 +27,7 @@ TEST(Write, OptionalMembers) {
             R"({"age":3,"avatar_url":"u","displayname":"x"})");
   EXPECT_EQ(json(profile{std::nullopt, "x", 3}), R"({"age":3,"displayname":"x"})");
   const profile one{"u", "x", std::nullopt};
-  const auto back = knot::read<profile>(json(one), knot::canonical);
+  const auto back = knot::try_read<profile>(json(one), knot::canonical);
   ASSERT_TRUE(back) << back.error().message;
   EXPECT_EQ(*back, one);
 }

@@ -24,7 +24,7 @@ namespace {
 using shapes::any_event;
 
 TEST(Read, AnyValue) {
-  const auto got = knot::read<any_event>(
+  const auto got = knot::try_read<any_event>(
       R"({"type":"org.example","content":{"body":"hi","n":[1,2.5,-3e2,true,null,{"x":{}}],"big":1e20}})");
   ASSERT_TRUE(got) << got.error().message << " at " << got.error().offset;
   const knot::value& content = got->content;
@@ -40,10 +40,10 @@ TEST(Read, AnyValue) {
   EXPECT_EQ(content["big"].as<double>(), 1e20);
   EXPECT_TRUE(content["absent"].is_null());
 
-  EXPECT_FALSE(knot::read<any_event>(R"({"type":"t","content":1e400})"));
-  EXPECT_FALSE(knot::read<any_event>(R"({"type":"t","content":{"a":1,"a":2}})"));
+  EXPECT_FALSE(knot::try_read<any_event>(R"({"type":"t","content":1e400})"));
+  EXPECT_FALSE(knot::try_read<any_event>(R"({"type":"t","content":{"a":1,"a":2}})"));
   const std::string deep = std::string(200, '[') + std::string(200, ']');
-  EXPECT_FALSE(knot::read<any_event>(R"({"type":"t","content":)" + deep + "}"));
+  EXPECT_FALSE(knot::try_read<any_event>(R"({"type":"t","content":)" + deep + "}"));
 
   // Canonical: integers only, keys sorted all the way down.
   EXPECT_TRUE(strict<any_event>(R"({"content":{"a":[1,{"b":null}],"c":"d"},"type":"t"})"));

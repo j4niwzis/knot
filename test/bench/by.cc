@@ -124,12 +124,12 @@ int main() {
     std::size_t index_by = 0;
     std::size_t index_tree = 0;
     const auto by = measure([&] {
-      auto got = knot::read<shapes::room_event>(text);
+      auto got = knot::try_read<shapes::room_event>(text);
       if (!got) std::abort();
       index_by = got->content.data().index();
     }, times);
     const auto tree = measure([&] {
-      auto got = knot::read<shapes::raw_event>(text);
+      auto got = knot::try_read<shapes::raw_event>(text);
       if (!got) std::abort();
       index_tree = plain(*got).index();
     }, times);

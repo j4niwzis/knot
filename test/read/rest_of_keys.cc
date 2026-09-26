@@ -28,7 +28,7 @@ TEST(ReadRest, KeysTheTypeDoesNotHaveAreKept) {
   const std::string text =
       R"({"type":"m.room.name","state_key":"","unsigned":{"age":5,"x":[1,null]},)"
       R"("event_id":"$e","z":true,"origin_server_ts":7})";
-  const auto got = knot::read<kept_event>(text);
+  const auto got = knot::try_read<kept_event>(text);
   ASSERT_TRUE(got) << got.error().message << " at " << got.error().offset;
   EXPECT_EQ(got->type, "m.room.name");
   EXPECT_EQ(got->origin_server_ts, 7);
@@ -43,16 +43,16 @@ TEST(ReadRest, KeysTheTypeDoesNotHaveAreKept) {
             R"({"event_id":"$e","origin_server_ts":7,"state_key":"","type":"m.room.name",)"
             R"("unsigned":{"age":5,"x":[1,null]},"z":true})");
   EXPECT_EQ(knot::to_json(*got) | std::ranges::to<std::string>(), canonical);
-  const auto again = knot::read<kept_event>(canonical, knot::canonical);
+  const auto again = knot::try_read<kept_event>(canonical, knot::canonical);
   ASSERT_TRUE(again) << again.error().message << " at " << again.error().offset;
   EXPECT_EQ(knot::to_json_string(*again), canonical);
 
   // Nothing kept: nothing written for it.
-  const auto plain = knot::read<kept_event>(R"({"type":"t","event_id":"$e"})");
+  const auto plain = knot::try_read<kept_event>(R"({"type":"t","event_id":"$e"})");
   ASSERT_TRUE(plain);
   EXPECT_EQ(knot::to_json_string(*plain), R"({"event_id":"$e","type":"t"})");
   // A key twice is refused, the kept ones too.
-  EXPECT_FALSE(knot::read<kept_event>(R"({"type":"t","event_id":"$e","z":1,"z":2})"));
+  EXPECT_FALSE(knot::try_read<kept_event>(R"({"type":"t","event_id":"$e","z":1,"z":2})"));
 }
 
 }  // namespace

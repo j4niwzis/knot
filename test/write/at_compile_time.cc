@@ -16,7 +16,7 @@ constexpr bool written() {
 
 constexpr bool read_back() {
   const event one{"x\x01y", -9007199254740991, {"$a", ""}};
-  const auto back = knot::read<event>(json(one));
+  const auto back = knot::try_read<event>(json(one));
   return back && *back == one;
 }
 

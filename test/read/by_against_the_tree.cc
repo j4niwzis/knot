@@ -175,8 +175,8 @@ TEST(ByRandom, AgreesWithTheTreeThenTyped) {
   int typed = 0;
   for (int round = 0; round != 20000; ++round) {
     const std::string text = made.event();
-    const auto by = knot::read<typed_event>(text);
-    const auto plain = knot::read<raw_event>(text);
+    const auto by = knot::try_read<typed_event>(text);
+    const auto plain = knot::try_read<raw_event>(text);
     ASSERT_EQ(bool(by), bool(plain)) << text;
     if (!by) continue;
     // Which alternative, and its fields.
@@ -195,14 +195,14 @@ TEST(ByRandom, AgreesWithTheTreeThenTyped) {
     if (round % 7 == 0) {
       std::vector<std::string> pieces;
       for (std::size_t at = 0; at < text.size(); at += 5) pieces.push_back(text.substr(at, 5));
-      const auto piecewise = knot::read<typed_event>(pieces | std::views::join);
+      const auto piecewise = knot::try_read<typed_event>(pieces | std::views::join);
       ASSERT_TRUE(piecewise) << text;
       ASSERT_EQ(knot::to_json_string(*piecewise), knot::to_json_string(*by)) << text;
     }
     // And as Canonical JSON -- content always before type -- read strictly.
     {
       const std::string canonical = knot::to_json_string(*plain);
-      const auto strict = knot::read<typed_event>(canonical, knot::canonical);
+      const auto strict = knot::try_read<typed_event>(canonical, knot::canonical);
       ASSERT_TRUE(strict) << strict.error().message << " at " << strict.error().offset << " in "
                           << canonical;
       ASSERT_EQ(strict->content.data().index(), by->content.data().index()) << canonical;

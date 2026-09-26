@@ -24,7 +24,7 @@ namespace {
 using shapes::signed_thing;
 
 TEST(Read, Maps) {
-  const auto got = knot::read<signed_thing>(
+  const auto got = knot::try_read<signed_thing>(
       R"({"signatures": {"b.org": {"ed25519:1": "sig"}, "a.org": {}}, "sender": "@x:a.org"})");
   ASSERT_TRUE(got) << got.error().message << " at " << got.error().offset;
   EXPECT_EQ(got->sender, "@x:a.org");
@@ -32,7 +32,7 @@ TEST(Read, Maps) {
   EXPECT_TRUE(got->signatures.at("a.org").empty());
   EXPECT_EQ(got->signatures.at("b.org").at("ed25519:1"), "sig");
 
-  EXPECT_FALSE(knot::read<signed_thing>(
+  EXPECT_FALSE(knot::try_read<signed_thing>(
       R"({"sender":"s","signatures":{"a":{},"a":{}}})"));  // a key twice
 
   EXPECT_TRUE(strict<signed_thing>(

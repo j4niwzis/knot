@@ -31,7 +31,7 @@ namespace {
 // Read with keys the type does not have, written back with them: nothing lost,
 // and in Canonical JSON's order.
 TEST(WriteBy, WhatWasKeptIsWrittenBack) {
-  const auto got = knot::read<shapes::room_event>(
+  const auto got = knot::try_read<shapes::room_event>(
       R"({"type":"m.room.message","content":{"msgtype":"m.text","m.relates_to":{"event_id":"$x","rel_type":"m.thread"},"body":"hi","extra":[1,{"a":null}]},"event_id":"$1"})");
   ASSERT_TRUE(got) << got.error().message;
   ASSERT_TRUE(got->content.is<shapes::message>());
@@ -40,7 +40,7 @@ TEST(WriteBy, WhatWasKeptIsWrittenBack) {
             R"("m.relates_to":{"event_id":"$x","rel_type":"m.thread"},"msgtype":"m.text"},)"
             R"("event_id":"$1","type":"m.room.message"})");
   // And reads back as Canonical JSON, the same.
-  const auto again = knot::read<shapes::room_event>(json(*got), knot::canonical);
+  const auto again = knot::try_read<shapes::room_event>(json(*got), knot::canonical);
   ASSERT_TRUE(again) << again.error().message;
   EXPECT_EQ(json(*again), json(*got));
 }

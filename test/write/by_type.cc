@@ -56,7 +56,7 @@ TEST(WriteBy, TheAlternativeHeld) {
   const room_event one{"m.room.member", member{"join", "x"}, "$1"};
   EXPECT_EQ(json(one),
             R"({"content":{"displayname":"x","membership":"join"},"event_id":"$1","type":"m.room.member"})");
-  const auto back = knot::read<room_event>(json(one), knot::canonical);
+  const auto back = knot::try_read<room_event>(json(one), knot::canonical);
   ASSERT_TRUE(back) << back.error().message;
   EXPECT_EQ(*back, one);
 }

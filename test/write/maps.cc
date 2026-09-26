@@ -32,7 +32,7 @@ TEST(Write, Maps) {
   EXPECT_EQ(json(one),
             R"({"sender":"@x:a.org","signatures":{"a.org":{},)"
             R"("b.org":{"ed25519:1":"one","ed25519:2":"two"}}})");
-  const auto back = knot::read<signed_thing>(json(one), knot::canonical);
+  const auto back = knot::try_read<signed_thing>(json(one), knot::canonical);
   ASSERT_TRUE(back) << back.error().message;
   EXPECT_EQ(*back, one);
   EXPECT_EQ(json(signed_thing{"s", {}}), R"({"sender":"s","signatures":{}})");

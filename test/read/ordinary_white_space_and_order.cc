@@ -8,7 +8,7 @@ import gtest;
 namespace {
 
 TEST(ReadOrdinary, WhiteSpaceAndAnyOrder) {
-  const auto got = knot::read<event>(
+  const auto got = knot::try_read<event>(
       " { \"prev\" : [ \"$a\" ,\n \"$b\" ] ,\r\n\t\"depth\":3, \"content\" : \"hi\" } ");
   ASSERT_TRUE(got) << got.error().message << " at " << got.error().offset;
   EXPECT_EQ(got->content, "hi");

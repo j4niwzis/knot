@@ -30,7 +30,7 @@ TEST(Write, AnyValue) {
   const any_event one{"org.example", content};
   EXPECT_EQ(json(one),
             R"({"content":{"a":{"k":2.5},"z":[1,true,null,"s"]},"type":"org.example"})");
-  const auto back = knot::read<any_event>(json(one));
+  const auto back = knot::try_read<any_event>(json(one));
   ASSERT_TRUE(back) << back.error().message;
   EXPECT_EQ(*back, one);
 }

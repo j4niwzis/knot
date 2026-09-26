@@ -30,6 +30,14 @@ struct error {
   std::size_t offset = 0;
 };
 
+// The same, thrown, by the reads that do not hand it back.
+struct read_failure : std::runtime_error {
+  explicit read_failure(const error& what)
+      : std::runtime_error(std::string(what.message) + " at " + std::to_string(what.offset)),
+        where(what) {}
+  error where;
+};
+
 // Asks for Canonical JSON and nothing else.
 struct canonical_t {
   explicit canonical_t() = default;
@@ -2357,11 +2365,11 @@ export namespace knot {
 // Any JSON, from text in memory or from any input range of characters, read
 // once: a stream, a socket's bytes, a view over pieces.
 template <described Type>
-constexpr std::expected<Type, error> read(std::string_view text) {
+constexpr std::expected<Type, error> try_read(std::string_view text) {
   return detail::read_whole<false, Type>(text.begin(), text.end());
 }
 template <described Type, detail::characters Range>
-constexpr std::expected<Type, error> read(Range&& text) {
+constexpr std::expected<Type, error> try_read(Range&& text) {
   return detail::read_whole<false, Type>(std::ranges::begin(text),
                                          std::ranges::end(text));
 }
@@ -2403,13 +2411,39 @@ constexpr std::optional<Type> from_value(value& tree) {
 
 // Canonical JSON and nothing else: what a signature or a hash is taken over.
 template <described Type>
-constexpr std::expected<Type, error> read(std::string_view text, canonical_t) {
+constexpr std::expected<Type, error> try_read(std::string_view text, canonical_t) {
   return detail::read_whole<true, Type>(text.begin(), text.end());
 }
 template <described Type, detail::characters Range>
-constexpr std::expected<Type, error> read(Range&& text, canonical_t) {
+constexpr std::expected<Type, error> try_read(Range&& text, canonical_t) {
   return detail::read_whole<true, Type>(std::ranges::begin(text),
                                         std::ranges::end(text));
+}
+
+// The same, throwing: the value, or a knot::read_failure.
+template <described Type>
+constexpr Type read(std::string_view text) {
+  auto got = try_read<Type>(text);
+  if (!got) throw read_failure(got.error());
+  return std::move(*got);
+}
+template <described Type, detail::characters Range>
+constexpr Type read(Range&& text) {
+  auto got = try_read<Type>(std::forward<Range>(text));
+  if (!got) throw read_failure(got.error());
+  return std::move(*got);
+}
+template <described Type>
+constexpr Type read(std::string_view text, canonical_t) {
+  auto got = try_read<Type>(text, canonical);
+  if (!got) throw read_failure(got.error());
+  return std::move(*got);
+}
+template <described Type, detail::characters Range>
+constexpr Type read(Range&& text, canonical_t) {
+  auto got = try_read<Type>(std::forward<Range>(text), canonical);
+  if (!got) throw read_failure(got.error());
+  return std::move(*got);
 }
 
 }  // namespace knot

@@ -137,7 +137,7 @@ TEST(ReadRandom, MadeUpDocuments) {
     std::string text = "{\"any\":";
     made.write(text, original);
     text += "}";
-    const auto got = knot::read<holder>(text);
+    const auto got = knot::try_read<holder>(text);
     ASSERT_TRUE(got) << got.error().message << " at " << got.error().offset << " in " << text;
     ASSERT_TRUE(got->any == original) << text;
 
@@ -145,7 +145,7 @@ TEST(ReadRandom, MadeUpDocuments) {
     if (round % 5 == 0) {
       std::vector<std::string> pieces;
       for (std::size_t at = 0; at < text.size(); at += 3) pieces.push_back(text.substr(at, 3));
-      const auto piecewise = knot::read<holder>(pieces | std::views::join);
+      const auto piecewise = knot::try_read<holder>(pieces | std::views::join);
       ASSERT_TRUE(piecewise) << text;
       ASSERT_TRUE(piecewise->any == original) << text;
     }
@@ -153,7 +153,7 @@ TEST(ReadRandom, MadeUpDocuments) {
     // Canonical, where it holds nothing Canonical JSON cannot say.
     const std::string canonical = knot::to_json_string(*got);
     const bool has_fraction = canonical.find('.') != std::string::npos;
-    const auto strict = knot::read<holder>(canonical, knot::canonical);
+    const auto strict = knot::try_read<holder>(canonical, knot::canonical);
     if (!has_fraction) {
       ASSERT_TRUE(strict) << strict.error().message << " at " << strict.error().offset
                           << " in " << canonical;
@@ -165,9 +165,9 @@ TEST(ReadRandom, MadeUpDocuments) {
     for (int broken = 0; broken != 8; ++broken) {
       std::string wrong = text;
       wrong[made.below(wrong.size())] = static_cast<char>(made.below(256));
-      (void)knot::read<holder>(wrong);
-      (void)knot::read<holder>(wrong, knot::canonical);
-      (void)knot::read<event>(wrong);
+      (void)knot::try_read<holder>(wrong);
+      (void)knot::try_read<holder>(wrong, knot::canonical);
+      (void)knot::try_read<event>(wrong);
     }
   }
 }

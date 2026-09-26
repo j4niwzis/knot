@@ -8,7 +8,7 @@ import gtest;
 namespace {
 
 std::optional<std::string> body(const std::string& text) {
-  const auto got = knot::read<event>(R"({"content":")" + text + R"(","depth":0,"prev":[]})");
+  const auto got = knot::try_read<event>(R"({"content":")" + text + R"(","depth":0,"prev":[]})");
   if (!got) return std::nullopt;
   return got->content;
 }

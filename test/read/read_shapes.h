@@ -53,7 +53,7 @@ using shapes::event;
 // Canonical JSON and nothing else.
 template <class Type>
 constexpr auto strict(auto&& text) {
-  return knot::read<Type>(std::forward<decltype(text)>(text), knot::canonical);
+  return knot::try_read<Type>(std::forward<decltype(text)>(text), knot::canonical);
 }
 
 }  // namespace

@@ -22,16 +22,16 @@ namespace {
 using shapes::profile;
 
 TEST(Read, OptionalMembers) {
-  const auto some = knot::read<profile>(R"({"displayname":"x"})");
+  const auto some = knot::try_read<profile>(R"({"displayname":"x"})");
   ASSERT_TRUE(some) << some.error().message;
   EXPECT_EQ(*some, (profile{std::nullopt, "x", std::nullopt}));
 
-  const auto all = knot::read<profile>(
+  const auto all = knot::try_read<profile>(
       R"({"avatar_url": null, "displayname":"x", "age":3})");
   ASSERT_TRUE(all) << all.error().message;
   EXPECT_EQ(*all, (profile{std::nullopt, "x", 3}));
 
-  EXPECT_FALSE(knot::read<profile>(R"({"age":3})"));  // displayname is not optional
+  EXPECT_FALSE(knot::try_read<profile>(R"({"age":3})"));  // displayname is not optional
 
   // Canonical: absent keys stepped over, and still in order.
   EXPECT_TRUE(strict<profile>(R"({"displayname":"x"})"));

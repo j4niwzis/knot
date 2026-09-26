@@ -20,11 +20,11 @@ namespace {
 using shapes::counts;
 
 TEST(Read, FlatMaps) {
-  const auto got = knot::read<counts>(R"({"by_name": {"b": 2, "a": 1, "c": 3}})");
+  const auto got = knot::try_read<counts>(R"({"by_name": {"b": 2, "a": 1, "c": 3}})");
   ASSERT_TRUE(got) << got.error().message;
   EXPECT_EQ(got->by_name.keys(), (std::vector<std::string>{"a", "b", "c"}));
   EXPECT_EQ(got->by_name.values(), (std::vector<std::int64_t>{1, 2, 3}));
-  EXPECT_FALSE(knot::read<counts>(R"({"by_name":{"b":1,"a":0,"b":2}})"));
+  EXPECT_FALSE(knot::try_read<counts>(R"({"by_name":{"b":1,"a":0,"b":2}})"));
 
   const auto sorted = strict<counts>(R"({"by_name":{"a":1,"b":2}})");
   ASSERT_TRUE(sorted) << sorted.error().message;

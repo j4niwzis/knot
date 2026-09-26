@@ -8,7 +8,7 @@ import gtest;
 namespace {
 
 TEST(ReadOrdinary, EveryEscape) {
-  const auto got = knot::read<event>(
+  const auto got = knot::try_read<event>(
       R"({"content":"\/\u0041\u00E9\ud83d\ude00\u001F\n","depth":0,"prev":[]})");
   ASSERT_TRUE(got) << got.error().message << " at " << got.error().offset;
   EXPECT_EQ(got->content, "/A\xc3\xa9\xf0\x9f\x98\x80\x1f\n");
@@ -21,7 +21,7 @@ TEST(ReadOrdinary, EveryEscape) {
        }) {
     const std::string text =
         R"({"content":)" + std::string(body) + R"(,"depth":0,"prev":[]})";
-    EXPECT_FALSE(knot::read<event>(text)) << text;
+    EXPECT_FALSE(knot::try_read<event>(text)) << text;
   }
 }
 

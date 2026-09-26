@@ -24,7 +24,7 @@ TEST(Write, FlatMaps) {
   one.by_name["b"] = 2;
   one.by_name["a"] = 1;
   EXPECT_EQ(json(one), R"({"by_name":{"a":1,"b":2}})");
-  const auto back = knot::read<counts>(json(one), knot::canonical);
+  const auto back = knot::try_read<counts>(json(one), knot::canonical);
   ASSERT_TRUE(back) << back.error().message;
   EXPECT_EQ(*back, one);
 }

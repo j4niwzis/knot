@@ -25,9 +25,9 @@ consteval auto json_schema(knot::type<room_event>) {
   return knot::schema<room_event>();
 }
 
-auto event = knot::read<room_event>(text);                    // any JSON
-auto signed_event = knot::read<room_event>(text, knot::canonical);
-std::string out = knot::to_json(*event) | std::ranges::to<std::string>();
+room_event event = knot::read<room_event>(text);              // any JSON; throws
+auto signed_event = knot::try_read<room_event>(text, knot::canonical);  // std::expected
+std::string out = knot::to_json_string(event);
 ```
 
 No document object model is built on the way, and no automaton either: for a
@@ -64,9 +64,14 @@ consteval auto json_schema(knot::type<content>) {
 ## Reading
 
 ```cpp
-std::expected<T, knot::error> knot::read<T>(text);                   // any JSON (RFC 8259)
-std::expected<T, knot::error> knot::read<T>(text, knot::canonical);  // Canonical JSON only
+T knot::read<T>(text);                                                   // any JSON (RFC 8259)
+T knot::read<T>(text, knot::canonical);                                  // Canonical JSON only
+std::expected<T, knot::error> knot::try_read<T>(text);                   // the same, handed back
+std::expected<T, knot::error> knot::try_read<T>(text, knot::canonical);
 ```
+
+`read` throws a `knot::read_failure` (a `std::runtime_error` with the
+`knot::error` in it); `try_read` hands the failure back instead, as in scan.
 
 `text` is a `std::string_view` or any input range of `char`: a
 `std::list<char>`, pieces `| std::views::join`, a stream through

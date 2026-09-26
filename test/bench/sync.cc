@@ -173,7 +173,7 @@ int main() {
   };
   std::size_t typed = 0;
   const auto by = measure([&] {
-    auto got = knot::read<matrix_sync::response>(text);
+    auto got = knot::try_read<matrix_sync::response>(text);
     if (!got) {
       std::println("{} at {}", got.error().message, got.error().offset);
       std::abort();
@@ -187,18 +187,18 @@ int main() {
   });
   // The same response as Canonical JSON, written by knot, read back strictly.
   const std::string canonical = [&] {
-    auto got = knot::read<matrix_sync::response>(text);
+    auto got = knot::try_read<matrix_sync::response>(text);
     return knot::to_json(*got) | std::ranges::to<std::string>();
   }();
   const auto strict = measure([&] {
-    auto got = knot::read<matrix_sync::response>(canonical, knot::canonical);
+    auto got = knot::try_read<matrix_sync::response>(canonical, knot::canonical);
     if (!got) {
       std::println("{} at {}", got.error().message, got.error().offset);
       std::abort();
     }
   });
   // Writing it: the lazy view, gathered into a string.
-  const auto typed_response = *knot::read<matrix_sync::response>(text);
+  const auto typed_response = *knot::try_read<matrix_sync::response>(text);
   const auto written = measure([&] {
     auto out = knot::to_json(typed_response) | std::ranges::to<std::string>();
     if (out.size() != canonical.size()) std::abort();
@@ -208,7 +208,7 @@ int main() {
     if (out.size() != canonical.size()) std::abort();
   });
   const auto tree = measure([&] {
-    auto got = knot::read<matrix_sync::whole>(text);
+    auto got = knot::try_read<matrix_sync::whole>(text);
     if (!got) std::abort();
   });
   std::println("a /sync of {:.2f} MB, 1000 events, {} of them typed", megabytes, typed);

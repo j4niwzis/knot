@@ -9,7 +9,7 @@ namespace {
 
 TEST(ReadOrdinary, NumbersInAnySpellingThatIsWhole) {
   const auto depth = [](std::string_view number) -> std::optional<std::int64_t> {
-    const auto got = knot::read<event>(R"({"content":"","depth":)" +
+    const auto got = knot::try_read<event>(R"({"content":"","depth":)" +
                                        std::string(number) + R"(,"prev":[]})");
     if (!got) return std::nullopt;
     return got->depth;
