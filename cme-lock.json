@@ -10,13 +10,14 @@
     "boost-pfr": {
       "commit": "401385c240027423acbb1eb6dea2abe0043db5aa",
       "port": [
-        "2861b39aab8b9c03459c4acd7de49c9f61fea9458533254ee32f98b2b9d8b384"
+        "2861b39aab8b9c03459c4acd7de49c9f61fea9458533254ee32f98b2b9d8b384",
+        "2b4380abe420ff1f611371752523d2a3cc0e6ead69e43941869a137a61685b9a"
       ],
       "url": "https://github.com/boostorg/pfr.git",
       "version": "1.92.0"
     },
     "cmake-everywhere": {
-      "version": "v0.2.5"
+      "version": "v0.2.10"
     },
     "googletest-modules": {
       "commit": "706920f1d230f0316d271466d8885735be3e300e",
