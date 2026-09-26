@@ -26,29 +26,23 @@ cme_find_package(Boost COMPONENTS pfr[modules] REQUIRED)
 set(KNOT_CONSTEXPR_STEPS 300000000 CACHE STRING
   "clang's -fconstexpr-steps for knot and what imports it")
 
-function(knot_module target file)
-  add_library(${target})
-  target_sources(${target}
-    PUBLIC FILE_SET CXX_MODULES BASE_DIRS src FILES ${file})
-  target_compile_features(${target} PUBLIC cxx_std_26)
-  target_link_libraries(${target} PUBLIC ${ARGN})
-  target_compile_options(${target} PUBLIC
-    $<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang>:-fconstexpr-steps=${KNOT_CONSTEXPR_STEPS}>)
-endfunction()
+# One library, libknot.a, with its modules in one file set: modules are what
+# separates it, and archives did not need to as well. Reading and writing
+# share the schema, the format and the value, so it has no components.
+add_library(knot)
+target_sources(knot PUBLIC FILE_SET CXX_MODULES BASE_DIRS src
+  FILES src/schema.cc src/format.cc src/value.cc src/read.cc src/write.cc src/knot.cc)
+target_compile_features(knot PUBLIC cxx_std_26)
+target_link_libraries(knot PUBLIC Boost::pfr)
+target_compile_options(knot PUBLIC
+  $<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang>:-fconstexpr-steps=${KNOT_CONSTEXPR_STEPS}>)
 
-knot_module(knot_schema src/schema.cc Boost::pfr)
-knot_module(knot_format src/format.cc knot_schema Boost::pfr)
-knot_module(knot_value src/value.cc knot_schema)
-knot_module(knot_read src/read.cc knot_format knot_value Boost::pfr)
-knot_module(knot_write src/write.cc knot_format knot_value knot_read Boost::pfr)
-knot_module(knot src/knot.cc knot_schema knot_format knot_value knot_read knot_write Boost::pfr)
-
-add_library(knot::schema ALIAS knot_schema)
-add_library(knot::format ALIAS knot_format)
-add_library(knot::value ALIAS knot_value)
-add_library(knot::read ALIAS knot_read)
-add_library(knot::write ALIAS knot_write)
+# The names the targets used to have, each the one library now.
 add_library(knot::knot ALIAS knot)
+foreach(name IN ITEMS schema format value read write)
+  add_library(knot::${name} ALIAS knot)
+  add_library(knot_${name} ALIAS knot)
+endforeach()
 
 if(KNOT_TESTS)
   enable_testing()
