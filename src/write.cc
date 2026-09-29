@@ -708,4 +708,76 @@ constexpr std::string to_json_string(const Type& value) {
   return out;
 }
 
+// The same JSON laid out for a person to read: each member and element on a
+// line of its own, indented by `indent` spaces a level, a space after each
+// colon; an empty object or array stays {} or []. What is written is what
+// write writes -- the same members in the same order, the same strings --
+// only spread out: it is laid out from that text, a string's insides passed
+// over as they are.
+constexpr void lay_out(std::string& out, std::string_view json, int indent = 2) {
+  int depth = 0;
+  bool in_string = false;
+  const auto new_line = [&] {
+    out += '\n';
+    out.append(static_cast<std::size_t>(depth * indent), ' ');
+  };
+  for (std::size_t at = 0; at < json.size(); ++at) {
+    const char c = json[at];
+    if (in_string) {
+      out += c;
+      if (c == '\\' && at + 1 < json.size())
+        out += json[++at];
+      else if (c == '"')
+        in_string = false;
+      continue;
+    }
+    switch (c) {
+      case '"':
+        in_string = true;
+        out += c;
+        break;
+      case '{':
+      case '[':
+        out += c;
+        // Empty: kept on the line it opens.
+        if (at + 1 < json.size() && (json[at + 1] == '}' || json[at + 1] == ']')) {
+          out += json[++at];
+          break;
+        }
+        ++depth;
+        new_line();
+        break;
+      case '}':
+      case ']':
+        --depth;
+        new_line();
+        out += c;
+        break;
+      case ',':
+        out += c;
+        new_line();
+        break;
+      case ':':
+        out += ": ";
+        break;
+      default:
+        out += c;
+    }
+  }
+}
+
+template <class Type>
+  requires document<std::remove_cvref_t<Type>>
+constexpr void write_pretty(std::string& out, const Type& value, int indent = 2) {
+  lay_out(out, to_json_string(value), indent);
+}
+
+template <class Type>
+  requires document<std::remove_cvref_t<Type>>
+constexpr std::string to_pretty_json_string(const Type& value, int indent = 2) {
+  std::string out;
+  write_pretty(out, value, indent);
+  return out;
+}
+
 }  // namespace knot
