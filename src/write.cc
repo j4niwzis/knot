@@ -23,6 +23,17 @@ export import knot.format;
 export import knot.value;
 import knot.read;
 
+namespace knot::detail {
+
+// Whether a rest member holds no keys: then the object is written from its
+// members alone.
+constexpr bool rest_empty(const value& kept) {
+  return kept.is_null() || (kept.is<value::object>() && kept.as<value::object>().empty());
+}
+constexpr bool rest_empty(const raw& kept) { return kept.text.empty() || kept.text == "{}"; }
+
+}  // namespace knot::detail
+
 namespace knot::detail::lazy {
 
 struct step;
@@ -382,8 +393,7 @@ constexpr std::unique_ptr<frame> frame_for(const Type& value) {
   } else if constexpr (described<Type>) {
     if constexpr (keeps_rest<Type>) {
       const auto& kept = boost::pfr::get<schema_of<Type>.rest_member()>(value);
-      if (!kept.is_null() &&
-          !(kept.template is<knot::value::object>() && kept.template as<knot::value::object>().empty())) {
+      if (!rest_empty(kept)) {
         return std::make_unique<owned_frame>(to_value(value));
       }
     }
@@ -662,8 +672,7 @@ constexpr void put(std::string& out, const Type& value) {
   } else if constexpr (described<Type>) {
     if constexpr (keeps_rest<Type>) {
       const auto& kept = boost::pfr::get<schema_of<Type>.rest_member()>(value);
-      if (!kept.is_null() &&
-          !(kept.template is<knot::value::object>() && kept.template as<knot::value::object>().empty())) {
+      if (!rest_empty(kept)) {
         put(out, to_value(value));
         return;
       }

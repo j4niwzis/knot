@@ -42,6 +42,14 @@ struct holder {
 };
 consteval auto json_schema(knot::type<holder>) { return knot::schema<holder>(); }
 
+struct open_one {
+  std::string known;
+  knot::raw rest;
+};
+consteval auto json_schema(knot::type<open_one>) {
+  return knot::schema<open_one>().member<"rest">(knot::rest);
+}
+
 }  // namespace raw_shapes
 
 using namespace raw_shapes;
@@ -98,4 +106,23 @@ TEST(TaggedWithRaw, NoTagStaysText) {
 TEST(TaggedWithRaw, RoundTrip) {
   const std::string text = R"({"content":{"a":[1,2]},"event_id":"$5","type":"org.example"})";
   EXPECT_EQ(knot::to_json_string(knot::read<event>(text)), text);
+}
+
+// knot::raw as a rest member: the keys the type has no member for, kept as
+// the text of one object -- each value's text as it came, never read.
+TEST(RawRest, KeepsTheOtherKeysAsText) {
+  const open_one got = knot::read<open_one>(R"({"x":[1, 2], "known":"k","y\"q": {"a":null}})");
+  EXPECT_EQ(got.known, "k");
+  EXPECT_EQ(got.rest.text, R"({"x":[1, 2],"y\"q":{"a":null}})");
+}
+
+TEST(RawRest, NoOtherKeysKeepNothing) {
+  const open_one got = knot::read<open_one>(R"({"known":"k"})");
+  EXPECT_TRUE(got.rest.text.empty());
+  EXPECT_EQ(knot::to_json_string(got), R"({"known":"k"})");
+}
+
+TEST(RawRest, IsWrittenBackAmongTheMembers) {
+  const open_one got = knot::read<open_one>(R"({"x":[1, 2], "known":"k","y\"q": {"a":null}})");
+  EXPECT_EQ(knot::to_json_string(got), R"({"known":"k","x":[1,2],"y\"q":{"a":null}})");
 }

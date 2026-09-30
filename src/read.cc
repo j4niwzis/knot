@@ -1070,6 +1070,52 @@ constexpr bool settle_member(Type& out, const std::array<bool, Size>& seen) {
   }
 }
 
+// The rest of an object's keys, kept in its rest member: as a tree, in a
+// knot::value; as the text of an object, in a knot::raw -- each value passed
+// over and its span copied, never read into anything.
+template <bool Canonical, class Cursor, class At>
+constexpr bool keep_rest(Cursor& in, value& kept, std::string_view key, const At& at) {
+  if (!kept.template is<value::object>()) kept = value(value::object{});
+  auto& members = std::get<value::object>(kept.data());
+  const auto [entry, made] = members.try_emplace(std::string(key));
+  if (!made) return in.fail_at("knot: a key twice", at);
+  return read_any<Canonical>(in, entry->second);
+}
+
+constexpr void put_json_text(std::string& out, std::string_view text) {
+  constexpr std::string_view hex = "0123456789abcdef";
+  out += '"';
+  for (const char letter : text) {
+    const auto code = static_cast<unsigned char>(letter);
+    if (letter == '"' || letter == '\\') {
+      out += '\\';
+      out += letter;
+    } else if (code < 0x20) {
+      out += "\\u00";
+      out += hex[code >> 4];
+      out += hex[code & 15];
+    } else {
+      out += letter;
+    }
+  }
+  out += '"';
+}
+
+template <bool Canonical, class Cursor, class At>
+constexpr bool keep_rest(Cursor& in, raw& kept, std::string_view key, const At&) {
+  static_assert(Cursor::in_memory, "knot: a knot::raw rest is read from text in memory");
+  if (kept.text.empty()) kept.text = "{}";
+  kept.text.pop_back();
+  if (kept.text.size() > 1) kept.text += ',';
+  put_json_text(kept.text, key);
+  kept.text += ':';
+  const std::string_view before = in.rest();
+  if (!pass_over<Canonical>(in)) return false;
+  kept.text.append(before.data(), before.size() - in.rest().size());
+  kept.text += '}';
+  return true;
+}
+
 template <bool Canonical, class Type, class Cursor>
 constexpr bool read_object(Cursor& in, Type& out) {
   constexpr std::size_t size = schema<Type>::size;
@@ -1137,12 +1183,8 @@ constexpr bool read_object(Cursor& in, Type& out) {
       if (rank == size) {
         if constexpr (keeps_rest<Type>) {
           auto& kept = boost::pfr::get<schema_of<Type>.rest_member()>(out);
-          if (!kept.template is<value::object>()) kept = value(value::object{});
-          auto& members = std::get<value::object>(kept.data());
           const std::string_view text = Canonical ? previous.text() : key.text();
-          const auto [entry, made] = members.try_emplace(std::string(text));
-          if (!made) return in.fail_at("knot: a key twice", at);
-          if (!read_any<Canonical>(in, entry->second)) return false;
+          if (!keep_rest<Canonical>(in, kept, text, at)) return false;
         } else {
           if (!pass_over<Canonical>(in)) return false;
         }
@@ -1623,7 +1665,7 @@ constexpr value object_to_tree(Type&& made, const bool* seen) {
     (([&] {
        if constexpr (keeps_rest<plain> &&
                      order_of<plain>[Rank] == schema_of<plain>.rest_member()) {
-         kept = std::move(boost::pfr::get<order_of<plain>[Rank]>(made));
+         kept = to_tree(std::move(boost::pfr::get<order_of<plain>[Rank]>(made)));
          return;
        }
        if (seen && !seen[Rank]) return;
