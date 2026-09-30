@@ -2784,6 +2784,22 @@ constexpr std::expected<Type, error> try_read(Range&& text) {
                                          std::ranges::end(text));
 }
 
+// One described type made another, without going through text: member by
+// member, matched by key -- a member of the same type moved across, another
+// made from that member alone. What only the source has is left in `rest`,
+// where that is asked for. None where the source does not fit the target: a
+// member the target needs that the source has not, or one that does not fit.
+template <described To, described From>
+[[nodiscard]] constexpr std::optional<To> convert(From from, value* rest = nullptr) {
+  value none;
+  if (!detail::hands_over<From, To>(from, none)) return std::nullopt;
+  To made{};
+  value left;
+  detail::hand_over(from, none, made, left);
+  if (rest != nullptr) *rest = std::move(left);
+  return made;
+}
+
 // The content of a knot::tagged whole, as a tree: the alternative it holds with
 // what it did not have laid back in -- what is written, so that an event read
 // is written back with nothing lost.
