@@ -354,6 +354,8 @@ constexpr std::unique_ptr<frame> frame_for(const Type& value) {
   } else if constexpr (std::same_as<Type, knot::value>) {
     return std::visit([](const auto& held) { return frame_for(held); },
                       value.data());
+  } else if constexpr (std::same_as<Type, knot::raw>) {
+    return std::make_unique<piece_frame>(std::string_view(value.text));
   } else if constexpr (std::same_as<Type, std::nullptr_t>) {
     return std::make_unique<piece_frame>(std::string_view("null"));
   } else if constexpr (std::same_as<Type, double>) {
@@ -623,6 +625,8 @@ constexpr void put(std::string& out, const Type& value) {
     }
   } else if constexpr (std::same_as<Type, knot::value>) {
     std::visit([&](const auto& held) { put(out, held); }, value.data());
+  } else if constexpr (std::same_as<Type, knot::raw>) {
+    out += value.text;
   } else if constexpr (std::same_as<Type, std::nullptr_t>) {
     out += "null";
   } else if constexpr (std::same_as<Type, bool>) {

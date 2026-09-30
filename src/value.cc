@@ -69,6 +69,15 @@ class value {
   variant held_;
 };
 
+// JSON kept as its text, byte for byte, and never looked into: what a
+// program does not understand, held to be shown ("View source") or passed on
+// as it came. Read, the value is only passed over to find where it ends;
+// written, the text goes out as it is.
+struct raw {
+  std::string text;
+  friend bool operator==(const raw&, const raw&) = default;
+};
+
 // A value chosen by a sibling key -- the content of an event by its "type":
 //
 //   struct message { std::string msgtype; std::string body; };
@@ -120,6 +129,9 @@ class tagged {
     std::size_t chosen = std::variant_npos;  // read into this by its tag
     bool in_tree = false;                    // the content went to the tree
     value tree;
+    // With knot::raw among the alternatives: the content's text, kept until
+    // the tag says what it is, and then read into that -- no tree between.
+    std::optional<std::string> pending;
   } reading;
 
  private:

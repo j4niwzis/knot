@@ -877,9 +877,13 @@ struct is_by : std::false_type {};
 template <name Tag, class... Alternatives>
 struct is_by<tagged<Tag, Alternatives...>> : std::true_type {};
 
+// What takes the content no alternative's tag names: a tree, or the text.
+template <class Alternative>
+concept fallback_alternative = std::same_as<Alternative, value> || std::same_as<Alternative, raw>;
+
 template <class Alternative>
 constexpr std::string_view tag_of() {
-  if constexpr (std::same_as<Alternative, value>) {
+  if constexpr (fallback_alternative<Alternative>) {
     return {};
   } else {
     return schema_of<Alternative>.tag_name();
@@ -896,13 +900,13 @@ struct by_alternatives<tagged<Tag, Alternatives...>> {
   static constexpr std::size_t fallback = [] {
     std::size_t found = std::variant_npos;
     std::size_t at = 0;
-    ((std::same_as<Alternatives, value> ? (found = at, ++at) : ++at), ...);
+    ((fallback_alternative<Alternatives> ? (found = at, ++at) : ++at), ...);
     return found;
   }();
   static constexpr std::size_t named(std::string_view tag) {
     std::size_t found = std::variant_npos;
     std::size_t at = 0;
-    (void)(((!std::same_as<Alternatives, value> && tag_of<Alternatives>() == tag)
+    (void)(((!fallback_alternative<Alternatives> && tag_of<Alternatives>() == tag)
                 ? (found = at, true)
                 : (++at, false)) ||
            ...);
@@ -912,11 +916,28 @@ struct by_alternatives<tagged<Tag, Alternatives...>> {
 
 template <bool Canonical, class Cursor>
 constexpr bool read_any(Cursor& in, value& out);
+template <bool Canonical, class Type, class Iterator, class Sentinel>
+constexpr std::expected<Type, error> read_whole(Iterator at, Sentinel end);
 template <bool Canonical, class Cursor>
 constexpr bool read_any_number(Cursor& in, value& out);
 template <bool Canonical, class By, class Cursor>
 constexpr bool read_by(Cursor& in, By& out);
 template <class By>
+constexpr bool settle_by(By& out, std::string_view tag);
+// With knot::raw among a tagged's alternatives: no tree, the text kept until
+// the tag is known (below, by read_by and settle_by constrained to it).
+template <class By>
+struct defers : std::false_type {};
+template <name Tag, class... Alternatives>
+struct defers<tagged<Tag, Alternatives...>>
+    : std::bool_constant<(std::same_as<Alternatives, raw> || ...)> {};
+template <class By>
+concept deferring = defers<By>::value;
+template <bool Canonical, class By, class Cursor>
+  requires deferring<By>
+constexpr bool read_by(Cursor& in, By& out);
+template <class By>
+  requires deferring<By>
 constexpr bool settle_by(By& out, std::string_view tag);
 
 
@@ -1629,6 +1650,10 @@ constexpr value to_tree(Type&& made) {
   using plain = std::remove_cvref_t<Type>;
   if constexpr (std::same_as<plain, value>) {
     return std::move(made);
+  } else if constexpr (std::same_as<plain, raw>) {
+    // Asked for as a tree, where a program still wants one: read now.
+    auto tree = read_whole<false, value>(made.text.data(), made.text.data() + made.text.size());
+    return tree ? std::move(*tree) : value();
   } else if constexpr (std::same_as<plain, std::string> || std::same_as<plain, bool>) {
     return value(std::move(made));
   } else if constexpr (json_integer<plain>) {
@@ -1668,6 +1693,9 @@ constexpr bool tree_fits(const value& tree) {
   const auto& held = tree.data();
   if constexpr (std::same_as<Type, value>) {
     return true;
+  } else if constexpr (std::same_as<Type, raw>) {
+    // Text is not made back from a tree: raw is only ever read.
+    return false;
   } else if constexpr (std::same_as<Type, std::string> || std::same_as<Type, bool>) {
     return std::holds_alternative<Type>(held);
   } else if constexpr (json_integer<Type>) {
@@ -1747,6 +1775,8 @@ constexpr bool from_tree(value& tree, Type& out) {
   if constexpr (std::same_as<Type, value>) {
     out = std::move(tree);
     return true;
+  } else if constexpr (std::same_as<Type, raw>) {
+    return false;
   } else if constexpr (std::same_as<Type, std::string> || std::same_as<Type, bool>) {
     auto* one = std::get_if<Type>(&held);
     if (!one) return false;
@@ -2185,6 +2215,8 @@ template <bool Canonical, class Type, class Cursor>
 constexpr went read_or_tree(Cursor& in, Type& out, value& tree, value* extras) {
   if constexpr (std::same_as<Type, value>) {
     return read_any<Canonical>(in, out) ? went::fit : went::failed;
+  } else if constexpr (std::same_as<Type, raw>) {
+    return read_value<Canonical>(in, out) ? went::fit : went::failed;
   } else if constexpr (std::same_as<Type, std::string>) {
     if (in.peek() != '"') return all_tree<Canonical>(in, tree);
     return read_string<Canonical>(in, out) ? went::fit : went::failed;
@@ -2251,7 +2283,7 @@ struct guess_of {
     std::size_t found = std::variant_npos;
     std::size_t at = 0;
     (void)(([&] {
-             if constexpr (!std::same_as<Alternatives, value>) {
+             if constexpr (!fallback_alternative<Alternatives>) {
                return rank_of<Alternatives>(
                           key, std::make_index_sequence<schema<Alternatives>::size>{}) !=
                       schema<Alternatives>::size;
@@ -2345,6 +2377,62 @@ constexpr bool read_by(Cursor& in, By& out) {
            ...);
     return read;
   }(std::make_index_sequence<alternatives::count>{});
+}
+
+// A knot::tagged with knot::raw among its alternatives reads no tree: its
+// content's text is kept as it is passed over, and read into the alternative
+// the tag names once the tag is known -- straight away, where it came first.
+// Content the named alternative does not fit, or that no tag names, stays
+// the text, as knot::raw.
+template <class By>
+  requires deferring<By>
+constexpr void settle_text(By& out, std::size_t target, std::string text) {
+  using alternatives = by_alternatives<By>;
+  const std::size_t into = target == std::variant_npos ? alternatives::fallback : target;
+  [&]<std::size_t... At>(std::index_sequence<At...>) {
+    (void)((into == At
+                ? ([&] {
+                     using held_type = std::variant_alternative_t<At, typename By::variant>;
+                     if constexpr (std::same_as<held_type, raw>) {
+                       out.data().template emplace<At>(raw{std::move(text)});
+                     } else {
+                       auto made = read_whole<false, held_type>(text.data(), text.data() + text.size());
+                       if (made) {
+                         out.data().template emplace<At>(std::move(*made));
+                       } else {
+                         out.data().template emplace<alternatives::fallback>(raw{std::move(text)});
+                       }
+                     }
+                   }(),
+                   true)
+                : false) ||
+           ...);
+  }(std::make_index_sequence<alternatives::count>{});
+}
+
+template <bool Canonical, class By, class Cursor>
+  requires deferring<By>
+constexpr bool read_by(Cursor& in, By& out) {
+  auto& state = out.reading;
+  out.unknown = value();
+  raw kept;
+  if (!read_value<Canonical>(in, kept)) return false;
+  if (state.chosen != std::variant_npos) {
+    settle_text(out, state.chosen, std::move(kept.text));
+  } else {
+    state.pending = std::move(kept.text);
+  }
+  return true;
+}
+
+template <class By>
+  requires deferring<By>
+constexpr bool settle_by(By& out, std::string_view tag) {
+  auto& state = out.reading;
+  if (!state.pending) return true;  // read by its tag already
+  settle_text(out, by_alternatives<By>::named(tag), std::move(*state.pending));
+  state.pending.reset();
+  return true;
 }
 
 // One described type made another, member by member, matched by key: the same
@@ -2579,6 +2667,13 @@ constexpr bool read_value(Cursor& in, Type& out) {
            in.fail_at("knot: a string none of the choice's alternatives is", start);
   } else if constexpr (std::same_as<Type, value>) {
     return read_any<Canonical>(in, out);
+  } else if constexpr (std::same_as<Type, raw>) {
+    // Passed over, and the span it took kept: the text must be in memory.
+    static_assert(Cursor::in_memory, "knot: knot::raw is read from text in memory");
+    const std::string_view before = in.rest();
+    if (!pass_over<Canonical>(in)) return false;
+    out.text.assign(before.data(), before.size() - in.rest().size());
+    return true;
   } else if constexpr (is_by<Type>::value) {
     out.reading = {};
     return read_by<Canonical>(in, out);
@@ -2627,7 +2722,8 @@ export namespace knot {
 // what they are made of -- an array, a map, a string, a choice, a number.
 template <class Type>
 concept document =
-    described<Type> || std::same_as<Type, value> || std::same_as<Type, std::string> ||
+    described<Type> || std::same_as<Type, value> || std::same_as<Type, raw> ||
+    std::same_as<Type, std::string> ||
     std::same_as<Type, bool> || std::same_as<Type, double> || detail::json_integer<Type> ||
     detail::is_choice<Type>::value || detail::is_vector<Type>::value ||
     detail::is_map<Type>::value;
