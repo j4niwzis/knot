@@ -11,6 +11,7 @@
 export module knot.value;
 
 import std;
+import splice;
 export import knot.schema;
 
 export namespace knot {
@@ -21,7 +22,7 @@ class value {
   // Sorted vectors of keys and of values: in Canonical JSON the keys arrive
   // in order, so an object is appended to and never rearranged.
   using object = std::flat_map<std::string, value, std::less<>>;
-  using variant = std::variant<std::nullptr_t, bool, std::int64_t, double,
+  using variant = splice::variant<std::nullptr_t, bool, std::int64_t, double,
                                std::string, array, object>;
 
   // null
@@ -38,24 +39,24 @@ class value {
   constexpr value(array held) : held_(std::move(held)) {}
   constexpr value(object held) : held_(std::move(held)) {}
 
-  // What it holds, for std::visit, std::get and std::holds_alternative.
+  // What it holds, for splice::visit, splice::get and splice::holds_alternative.
   [[nodiscard]] constexpr const variant& data() const& { return held_; }
   [[nodiscard]] constexpr variant& data() & { return held_; }
 
   template <class Alternative>
   [[nodiscard]] constexpr bool is() const {
-    return std::holds_alternative<Alternative>(held_);
+    return splice::holds_alternative<Alternative>(held_);
   }
   template <class Alternative>
   [[nodiscard]] constexpr const Alternative& as() const {
-    return std::get<Alternative>(held_);
+    return splice::get<Alternative>(held_);
   }
   [[nodiscard]] constexpr bool is_null() const { return is<std::nullptr_t>(); }
 
   // A member of an object, or null where there is none or this is no object.
   [[nodiscard]] const value& operator[](std::string_view key) const {
     static const value none;
-    if (const auto* members = std::get_if<object>(&held_)) {
+    if (const auto* members = splice::get_if<object>(&held_)) {
       if (const auto found = members->find(key); found != members->end()) {
         return found->second;
       }
@@ -95,7 +96,7 @@ struct raw {
 template <name Tag, class... Alternatives>
 class tagged {
  public:
-  using variant = std::variant<Alternatives...>;
+  using variant = splice::variant<Alternatives...>;
   static constexpr std::string_view tag_key = Tag.view();
 
   constexpr tagged() = default;
@@ -107,11 +108,11 @@ class tagged {
   [[nodiscard]] constexpr variant& data() & { return held_; }
   template <class Alternative>
   [[nodiscard]] constexpr bool is() const {
-    return std::holds_alternative<Alternative>(held_);
+    return splice::holds_alternative<Alternative>(held_);
   }
   template <class Alternative>
   [[nodiscard]] constexpr const Alternative& as() const {
-    return std::get<Alternative>(held_);
+    return splice::get<Alternative>(held_);
   }
 
   friend constexpr bool operator==(const tagged& one, const tagged& other) {

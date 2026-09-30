@@ -18,6 +18,7 @@
 export module knot.write;
 
 import std;
+import splice;
 import boost.pfr;
 export import knot.format;
 export import knot.value;
@@ -360,10 +361,10 @@ constexpr std::unique_ptr<frame> frame_for(const Type& value) {
     // A knot::tagged: the alternative it holds -- with what it did not have laid
     // back in, where there is any.
     if (!value.unknown.is_null()) return std::make_unique<owned_frame>(as_tree(value));
-    return std::visit([](const auto& held) { return frame_for(held); },
+    return splice::visit([](const auto& held) { return frame_for(held); },
                       value.data());
   } else if constexpr (std::same_as<Type, knot::value>) {
-    return std::visit([](const auto& held) { return frame_for(held); },
+    return splice::visit([](const auto& held) { return frame_for(held); },
                       value.data());
   } else if constexpr (std::same_as<Type, knot::raw>) {
     return std::make_unique<piece_frame>(std::string_view(value.text));
@@ -631,10 +632,10 @@ constexpr void put(std::string& out, const Type& value) {
     if (!value.unknown.is_null()) {
       put(out, as_tree(value));
     } else {
-      std::visit([&](const auto& held) { put(out, held); }, value.data());
+      splice::visit([&](const auto& held) { put(out, held); }, value.data());
     }
   } else if constexpr (std::same_as<Type, knot::value>) {
-    std::visit([&](const auto& held) { put(out, held); }, value.data());
+    splice::visit([&](const auto& held) { put(out, held); }, value.data());
   } else if constexpr (std::same_as<Type, knot::raw>) {
     out += value.text;
   } else if constexpr (std::same_as<Type, std::nullptr_t>) {

@@ -22,6 +22,10 @@
     "googletest-modules": {
       "commit": "706920f1d230f0316d271466d8885735be3e300e",
       "url": "https://github.com/j4niwzis/googletest-modules.git"
+    },
+    "splice": {
+      "commit": "4668680e970afb6bafa83c908551c3b84bd1adf3",
+      "url": "https://github.com/j4niwzis/splice.git"
     }
   }
 }

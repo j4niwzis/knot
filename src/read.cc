@@ -19,6 +19,7 @@
 export module knot.read;
 
 import std;
+import splice;
 import boost.pfr;
 export import knot.format;
 export import knot.value;
@@ -1076,7 +1077,7 @@ constexpr bool settle_member(Type& out, const std::array<bool, Size>& seen) {
 template <bool Canonical, class Cursor, class At>
 constexpr bool keep_rest(Cursor& in, value& kept, std::string_view key, const At& at) {
   if (!kept.template is<value::object>()) kept = value(value::object{});
-  auto& members = std::get<value::object>(kept.data());
+  auto& members = splice::get<value::object>(kept.data());
   const auto [entry, made] = members.try_emplace(std::string(key));
   if (!made) return in.fail_at("knot: a key twice", at);
   return read_any<Canonical>(in, entry->second);
@@ -1581,9 +1582,9 @@ constexpr bool read_any_number(Cursor& in, value& out) {
 // A number read as a double: a whole one is read as an integer, which has
 // no -0, so the sign written says which zero it is.
 constexpr double as_double(const value& number, bool minus) {
-  if (const auto* whole = std::get_if<std::int64_t>(&number.data()))
+  if (const auto* whole = splice::get_if<std::int64_t>(&number.data()))
     return *whole == 0 && minus ? -0.0 : static_cast<double>(*whole);
-  return std::get<double>(number.data());
+  return splice::get<double>(number.data());
 }
 
 // Any JSON, into a value: the nesting bounded here, since no type bounds it.
@@ -1719,7 +1720,7 @@ constexpr value to_tree(Type&& made) {
     }
     return value(std::move(members));
   } else if constexpr (is_by<plain>::value) {
-    return std::visit([](auto& held) { return to_tree(std::move(held)); },
+    return splice::visit([](auto& held) { return to_tree(std::move(held)); },
                       made.data());
   } else if constexpr (described<plain>) {
     return object_to_tree(std::move(made), nullptr);
@@ -1739,33 +1740,33 @@ constexpr bool tree_fits(const value& tree) {
     // Text is not made back from a tree: raw is only ever read.
     return false;
   } else if constexpr (std::same_as<Type, std::string> || std::same_as<Type, bool>) {
-    return std::holds_alternative<Type>(held);
+    return splice::holds_alternative<Type>(held);
   } else if constexpr (json_integer<Type>) {
-    const auto* one = std::get_if<std::int64_t>(&held);
+    const auto* one = splice::get_if<std::int64_t>(&held);
     return one && std::in_range<Type>(*one);
   } else if constexpr (std::same_as<Type, double>) {
-    return std::holds_alternative<double>(held) || std::holds_alternative<std::int64_t>(held);
+    return splice::holds_alternative<double>(held) || splice::holds_alternative<std::int64_t>(held);
   } else if constexpr (is_choice<Type>::value) {
-    const auto* one = std::get_if<std::string>(&held);
+    const auto* one = splice::get_if<std::string>(&held);
     return one && (choice<Type>::open || choice<Type>::find(*one) != choice<Type>::count);
   } else if constexpr (is_optional<Type>::value) {
     return tree.is_null() || tree_fits<typename Type::value_type>(tree);
   } else if constexpr (is_vector<Type>::value) {
-    const auto* items = std::get_if<value::array>(&held);
+    const auto* items = splice::get_if<value::array>(&held);
     if (!items) return false;
     for (const auto& one : *items) {
       if (!tree_fits<typename Type::value_type>(one)) return false;
     }
     return true;
   } else if constexpr (is_map<Type>::value) {
-    const auto* members = std::get_if<value::object>(&held);
+    const auto* members = splice::get_if<value::object>(&held);
     if (!members) return false;
     for (const auto& [key, one] : *members) {
       if (!tree_fits<typename Type::mapped_type>(one)) return false;
     }
     return true;
   } else if constexpr (described<Type>) {
-    const auto* members = std::get_if<value::object>(&held);
+    const auto* members = splice::get_if<value::object>(&held);
     if (!members) return false;
     return [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
       return (true && ... && [&] {
@@ -1820,26 +1821,26 @@ constexpr bool from_tree(value& tree, Type& out) {
   } else if constexpr (std::same_as<Type, raw>) {
     return false;
   } else if constexpr (std::same_as<Type, std::string> || std::same_as<Type, bool>) {
-    auto* one = std::get_if<Type>(&held);
+    auto* one = splice::get_if<Type>(&held);
     if (!one) return false;
     out = std::move(*one);
     return true;
   } else if constexpr (json_integer<Type>) {
-    auto* one = std::get_if<std::int64_t>(&held);
+    auto* one = splice::get_if<std::int64_t>(&held);
     if (!one || !std::in_range<Type>(*one)) return false;
     out = static_cast<Type>(*one);
     return true;
   } else if constexpr (std::same_as<Type, double>) {
-    if (const auto* whole = std::get_if<std::int64_t>(&held)) {
+    if (const auto* whole = splice::get_if<std::int64_t>(&held)) {
       out = static_cast<double>(*whole);
       return true;
     }
-    const auto* one = std::get_if<double>(&held);
+    const auto* one = splice::get_if<double>(&held);
     if (!one) return false;
     out = *one;
     return true;
   } else if constexpr (is_choice<Type>::value) {
-    auto* one = std::get_if<std::string>(&held);
+    auto* one = splice::get_if<std::string>(&held);
     return one && choice<Type>::settle(*one, out);
   } else if constexpr (is_optional<Type>::value) {
     if (tree.is_null()) {
@@ -1848,7 +1849,7 @@ constexpr bool from_tree(value& tree, Type& out) {
     }
     return from_tree(tree, out.emplace());
   } else if constexpr (is_vector<Type>::value) {
-    auto* items = std::get_if<value::array>(&held);
+    auto* items = splice::get_if<value::array>(&held);
     if (!items) return false;
     out.clear();
     for (auto& one : *items) {
@@ -1856,7 +1857,7 @@ constexpr bool from_tree(value& tree, Type& out) {
     }
     return true;
   } else if constexpr (is_map<Type>::value) {
-    auto* members = std::get_if<value::object>(&held);
+    auto* members = splice::get_if<value::object>(&held);
     if (!members) return false;
     out.clear();
     for (auto&& [key, one] : *members) {
@@ -1866,7 +1867,7 @@ constexpr bool from_tree(value& tree, Type& out) {
     }
     return true;
   } else if constexpr (described<Type>) {
-    auto* members = std::get_if<value::object>(&held);
+    auto* members = splice::get_if<value::object>(&held);
     if (!members) return false;
     return object_from_tree(*members, out);
   } else {
@@ -1930,8 +1931,8 @@ constexpr bool rest_of_object(Cursor& in, value::object& members,
 // the members they belong to.
 constexpr void lay(value& tree, value overlay) {
   if (overlay.is_null()) return;
-  auto* into = std::get_if<value::object>(&tree.data());
-  auto* from = std::get_if<value::object>(&overlay.data());
+  auto* into = splice::get_if<value::object>(&tree.data());
+  auto* from = splice::get_if<value::object>(&overlay.data());
   if (into && from) {
     for (auto&& [key, one] : *from) {
       const auto found = into->find(key);
@@ -1943,8 +1944,8 @@ constexpr void lay(value& tree, value overlay) {
     }
     return;
   }
-  auto* items = std::get_if<value::array>(&tree.data());
-  auto* overlays = std::get_if<value::array>(&overlay.data());
+  auto* items = splice::get_if<value::array>(&tree.data());
+  auto* overlays = splice::get_if<value::array>(&overlay.data());
   if (items && overlays) {
     for (std::size_t at = 0; at < items->size() && at < overlays->size(); ++at) {
       lay((*items)[at], std::move((*overlays)[at]));
@@ -1960,7 +1961,7 @@ constexpr value left_over(const value& tree) {
   if constexpr (is_optional<Type>::value) {
     return tree.is_null() ? value() : left_over<typename Type::value_type>(tree);
   } else if constexpr (is_vector<Type>::value) {
-    const auto* items = std::get_if<value::array>(&held);
+    const auto* items = splice::get_if<value::array>(&held);
     if (!items) return value();
     value::array overlays;
     bool any = false;
@@ -1970,7 +1971,7 @@ constexpr value left_over(const value& tree) {
     }
     return any ? value(std::move(overlays)) : value();
   } else if constexpr (is_map<Type>::value) {
-    const auto* members = std::get_if<value::object>(&held);
+    const auto* members = splice::get_if<value::object>(&held);
     if (!members) return value();
     value::object overlay;
     for (const auto& [key, one] : *members) {
@@ -1979,7 +1980,7 @@ constexpr value left_over(const value& tree) {
     }
     return overlay.empty() ? value() : value(std::move(overlay));
   } else if constexpr (described<Type>) {
-    const auto* members = std::get_if<value::object>(&held);
+    const auto* members = splice::get_if<value::object>(&held);
     if (!members) return value();
     value::object overlay;
     for (const auto& [key, one] : *members) {
@@ -2113,8 +2114,8 @@ constexpr went map_or_tree(Cursor& in, Map& out, value& tree, value* extras) {
       }
       value made(std::move(members));
       lay(made, value(std::move(overlays)));
-      std::get<value::object>(made.data()).emplace(key, std::move(turned));
-      if (!rest_of_object<Canonical>(in, std::get<value::object>(made.data()), previous)) {
+      splice::get<value::object>(made.data()).emplace(key, std::move(turned));
+      if (!rest_of_object<Canonical>(in, splice::get<value::object>(made.data()), previous)) {
         return went::failed;
       }
       tree = std::move(made);
@@ -2153,7 +2154,7 @@ constexpr went object_or_tree(Cursor& in, Type& out, value& tree, value* extras,
   const auto turn = [&](std::string key, value turned, const std::string& previous) {
     value made = object_to_tree(std::move(out), seen.data());
     lay(made, value(std::move(overlay)));
-    auto& members = std::get<value::object>(made.data());
+    auto& members = splice::get<value::object>(made.data());
     members.emplace(std::move(key), std::move(turned));
     if (!rest_of_object<Canonical>(in, members, previous)) return went::failed;
     tree = std::move(made);
@@ -2271,7 +2272,7 @@ constexpr went read_or_tree(Cursor& in, Type& out, value& tree, value* extras) {
     }
     value number;
     if (!read_any_number<Canonical>(in, number)) return went::failed;
-    if (const auto* whole = std::get_if<std::int64_t>(&number.data());
+    if (const auto* whole = splice::get_if<std::int64_t>(&number.data());
         whole && std::in_range<Type>(*whole)) {
       out = static_cast<Type>(*whole);
       return went::fit;
@@ -2434,7 +2435,7 @@ constexpr void settle_text(By& out, std::size_t target, std::string text) {
   [&]<std::size_t... At>(std::index_sequence<At...>) {
     (void)((into == At
                 ? ([&] {
-                     using held_type = std::variant_alternative_t<At, typename By::variant>;
+                     using held_type = splice::variant_alternative_t<At, typename By::variant>;
                      if constexpr (std::same_as<held_type, raw>) {
                        out.data().template emplace<At>(raw{std::move(text)});
                      } else {
@@ -2484,7 +2485,7 @@ constexpr bool settle_by(By& out, std::string_view tag) {
 // Asked first whether it would fit, so that nothing moves where it would not.
 template <class From, class To>
 constexpr bool hands_over(const From& from, const value& overlay) {
-  const auto* kept = std::get_if<value::object>(&overlay.data());
+  const auto* kept = splice::get_if<value::object>(&overlay.data());
   return [&]<std::size_t... Rank>(std::index_sequence<Rank...>) {
     return (true && ... && [&] {
       using to_member = field_t<To, order_of<To>[Rank]>;
@@ -2518,7 +2519,7 @@ constexpr bool hands_over(const From& from, const value& overlay) {
 
 template <class From, class To>
 constexpr void hand_over(From& from, value& overlay, To& to, value& rest) {
-  auto* kept = std::get_if<value::object>(&overlay.data());
+  auto* kept = splice::get_if<value::object>(&overlay.data());
   value::object left;
   const auto take = [&](std::string_view key) -> value* {
     if (!kept) return nullptr;
@@ -2607,7 +2608,7 @@ constexpr bool settle_by(By& out, std::string_view tag) {
   if (!state.in_tree) {
     // From one typed alternative to another: directly, where it fits.
     std::optional<typename By::variant> handed;
-    std::visit(
+    splice::visit(
         [&](auto& held) {
           using from_type = std::remove_cvref_t<decltype(held)>;
           if constexpr (described<from_type>) {
@@ -2615,7 +2616,7 @@ constexpr bool settle_by(By& out, std::string_view tag) {
               (void)((target == At
                           ? ([&] {
                                using to_type =
-                                   std::variant_alternative_t<At, typename By::variant>;
+                                   splice::variant_alternative_t<At, typename By::variant>;
                                if constexpr (described<to_type>) {
                                  if (!hands_over<from_type, to_type>(held, out.unknown)) return;
                                  to_type made{};
@@ -2641,7 +2642,7 @@ constexpr bool settle_by(By& out, std::string_view tag) {
   if (state.in_tree) {
     tree = std::move(state.tree);
   } else {
-    tree = std::visit([](auto& held) { return to_tree(std::move(held)); }, out.data());
+    tree = splice::visit([](auto& held) { return to_tree(std::move(held)); }, out.data());
     lay(tree, std::move(out.unknown));
   }
   out.unknown = value();
@@ -2651,7 +2652,7 @@ constexpr bool settle_by(By& out, std::string_view tag) {
     bool fits = false;
     (void)((target == At
                 ? (fits = [&] {
-                     using typed_type = std::variant_alternative_t<At, typename By::variant>;
+                     using typed_type = splice::variant_alternative_t<At, typename By::variant>;
                      if constexpr (std::same_as<typed_type, value>) {
                        out.data().template emplace<At>(std::move(tree));
                        return true;
@@ -2789,7 +2790,7 @@ constexpr std::expected<Type, error> try_read(Range&& text) {
 template <class By>
   requires requires(const By& content) { content.unknown; content.data(); }
 value as_tree(const By& content) {
-  value tree = std::visit(
+  value tree = splice::visit(
       [](const auto& held) {
         auto copy = held;
         return detail::to_tree(std::move(copy));

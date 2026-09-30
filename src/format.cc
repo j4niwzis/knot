@@ -20,6 +20,7 @@
 export module knot.format;
 
 import std;
+import splice;
 import boost.pfr;
 export import knot.schema;
 
@@ -142,18 +143,20 @@ consteval bool choice_shape() {
   }
 }
 
+// A choice is a splice::variant or a std::variant of that shape: the same
+// reading and writing for both.
 template <class Type>
 struct is_choice : std::false_type {};
+template <class... Alternatives>
+struct is_choice<splice::variant<Alternatives...>>
+    : std::bool_constant<choice_shape<Alternatives...>()> {};
 template <class... Alternatives>
 struct is_choice<std::variant<Alternatives...>>
     : std::bool_constant<choice_shape<Alternatives...>()> {};
 
-template <class Type>
-struct choice;
-
-template <class... Alternatives>
-struct choice<std::variant<Alternatives...>> {
-  using type = std::variant<Alternatives...>;
+template <class Variant, class... Alternatives>
+struct choice_of {
+  using type = Variant;
   static constexpr std::size_t count = sizeof...(Alternatives);
   // Whether a string none of the others is, is kept as it is.
   static constexpr bool open = std::same_as<Alternatives...[count - 1], std::string>;
@@ -185,7 +188,10 @@ struct choice<std::variant<Alternatives...>> {
   // The string an alternative is: for the kept one, what was kept.
   static constexpr std::string_view name(const type& held) {
     if constexpr (open) {
-      if (held.index() == count - 1) return std::get<count - 1>(held);
+      if (held.index() == count - 1) {
+        using std::get;  // std's, or splice's found with the variant
+        return get<count - 1>(held);
+      }
     }
     return names[held.index()];
   }
@@ -208,6 +214,13 @@ struct choice<std::variant<Alternatives...>> {
     return true;
   }
 };
+
+template <class Type>
+struct choice;
+template <class... Alternatives>
+struct choice<splice::variant<Alternatives...>> : choice_of<splice::variant<Alternatives...>, Alternatives...> {};
+template <class... Alternatives>
+struct choice<std::variant<Alternatives...>> : choice_of<std::variant<Alternatives...>, Alternatives...> {};
 
 template <class Type, std::size_t Index>
 using field_t = std::remove_cvref_t<boost::pfr::tuple_element_t<Index, Type>>;
