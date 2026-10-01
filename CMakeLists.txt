@@ -32,9 +32,8 @@ set(SPLICE_CONSTEXPR_STEPS ${KNOT_CONSTEXPR_STEPS} CACHE STRING
   "clang's -fconstexpr-steps for splice, as knot sets it")
 cme_declare_port(NAME splice PROVIDES splice
   GITHUB_REPOSITORY j4niwzis/splice
-  GIT_TAG 39bc67a00185f488c989d3c18b98e5995e4dc8dd
+  GIT_TAG f2c25443061ba5353720eccd0a9438793c2ea053
   LICENSE GPL-3.0-only
-  SYSTEM NEVER
   TARGETS splice)
 cme_options(splice "SPLICE_TESTS OFF")
 cme_find_package(splice REQUIRED)
@@ -60,4 +59,34 @@ endforeach()
 if(KNOT_TESTS)
   enable_testing()
   add_subdirectory(test)
+endif()
+
+# ---- What this library is, said by the library; and installing it ----
+#
+# A consumer writes find_package(knot) and this says the rest: where it
+# comes from, what it needs, and what it produces -- installed beside the
+# library by cmake-everywhere, under share/cmake-everywhere/ports, so that a
+# prefix that has knot describes it too.
+if(COMMAND cme_declare_port)
+  cme_declare_port(
+    NAME knot
+    PROVIDES knot
+    VERSION ${PROJECT_VERSION}
+    GITHUB_REPOSITORY j4niwzis/knot
+    GIT_TAG main
+    LICENSE AGPL-3.0-only
+    DEPENDS splice "boost-pfr[modules]"
+    TARGETS knot::knot)
+endif()
+# The library, its module interface units -- a consumer compiles its own
+# binary interfaces from them -- and a package: find_package(knot) on a
+# machine that has it installed finds it there, by the names it has here
+# too, and what it needs again from the ports it came from.
+option(KNOT_INSTALL "Install knot and its CMake package" ${PROJECT_IS_TOP_LEVEL})
+if(KNOT_INSTALL)
+  set(knot_aliases "")
+  foreach(name IN ITEMS schema format value read write)
+    list(APPEND knot_aliases knot::${name} knot_${name})
+  endforeach()
+  cme_install_package(knot ALIASES ${knot_aliases})
 endif()
