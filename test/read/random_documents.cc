@@ -4,6 +4,7 @@
 // byte at a time, which may fail to read but must never do anything worse.
 import std;
 import knot;
+import splice;
 import gtest;
 
 #include "gtest/gtest-macros.h"
@@ -79,47 +80,40 @@ struct maker {
 
   void write(std::string& out, const knot::value& one) {
     out += space();
-    std::visit(
-        [&](const auto& held) {
-          using type = std::remove_cvref_t<decltype(held)>;
-          if constexpr (std::same_as<type, std::nullptr_t>) {
-            out += "null";
-          } else if constexpr (std::same_as<type, bool>) {
-            out += held ? "true" : "false";
-          } else if constexpr (std::same_as<type, std::int64_t>) {
-            if (below(4) == 0) {
-              out += std::format("{}.0", held);  // whole, though written with a fraction
-            } else {
-              out += std::format("{}", held);
-            }
-          } else if constexpr (std::same_as<type, double>) {
-            out += std::format("{}", held);
-          } else if constexpr (std::same_as<type, std::string>) {
-            write_string(out, held);
-          } else if constexpr (std::same_as<type, knot::value::array>) {
-            out += '[';
-            for (std::size_t at = 0; at != held.size(); ++at) {
-              if (at) out += ',';
-              write(out, held[at]);
-            }
-            out += space() + ']';
-          } else {
-            std::vector<std::size_t> order(held.size());
-            for (std::size_t at = 0; at != order.size(); ++at) order[at] = at;
-            std::ranges::shuffle(order, random);
-            out += '{';
-            bool first = true;
-            for (const std::size_t at : order) {
-              if (!first) out += ',';
-              first = false;
-              out += space();
-              write_string(out, held.keys()[at]);
-              out += space() + ':';
-              write(out, held.values()[at]);
-            }
-            out += space() + '}';
-          }
-        },
+    splice::visit(
+        splice::overloaded{
+            [&](std::nullptr_t) { out += "null"; },
+            [&](bool held) { out += held ? "true" : "false"; },
+            [&](std::int64_t held) {
+              // whole, though now and then written with a fraction
+              out += below(4) == 0 ? std::format("{}.0", held) : std::format("{}", held);
+            },
+            [&](double held) { out += std::format("{}", held); },
+            [&](const std::string& held) { write_string(out, held); },
+            [&](const knot::value::array& held) {
+              out += '[';
+              for (std::size_t at = 0; at != held.size(); ++at) {
+                if (at) out += ',';
+                write(out, held[at]);
+              }
+              out += space() + ']';
+            },
+            [&](const knot::value::object& held) {
+              std::vector<std::size_t> order(held.size());
+              for (std::size_t at = 0; at != order.size(); ++at) order[at] = at;
+              std::ranges::shuffle(order, random);
+              out += '{';
+              bool first = true;
+              for (const std::size_t at : order) {
+                if (!first) out += ',';
+                first = false;
+                out += space();
+                write_string(out, held.keys()[at]);
+                out += space() + ':';
+                write(out, held.values()[at]);
+              }
+              out += space() + '}';
+            }},
         one.data());
     out += space();
   }
