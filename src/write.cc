@@ -578,6 +578,29 @@ constexpr json_view<std::remove_cvref_t<Type>> to_json(Type&& value) {
   return json_view<std::remove_cvref_t<Type>>(std::forward<Type>(value));
 }
 
+// A value to be formatted as its JSON: std::format("{}", knot::as_json{value})
+// writes it through the format's own output, piece by piece, as write()
+// does -- no string made first. It refers to the value, which outlives it.
+template <class Type>
+struct as_json {
+  const Type& value;
+};
+template <class Type>
+as_json(const Type&) -> as_json<Type>;
+
+// A value as Canonical JSON, written through an output iterator a piece at a
+// time, as the lazy view makes them: into whatever the iterator writes to --
+// a byte buffer through a transform, a hash, a file -- with no string made
+// first. The iterator past what was written is given back.
+template <class Type, class Out>
+  requires document<std::remove_cvref_t<Type>> && std::output_iterator<Out, char>
+constexpr Out write(Out out, const Type& value) {
+  auto json = to_json(value);
+  for (const std::string_view piece : json.chunks())
+    out = std::ranges::copy(piece, std::move(out)).out;
+  return out;
+}
+
 }  // namespace knot
 
 namespace knot::detail::eager {
@@ -795,3 +818,14 @@ constexpr std::string to_pretty_json_string(const Type& value, int indent = 2) {
 }
 
 }  // namespace knot
+
+// std::format's way to it: the JSON written through the context's iterator.
+template <class Type>
+  requires knot::document<std::remove_cvref_t<Type>>
+struct std::formatter<knot::as_json<Type>, char> {
+  constexpr auto parse(std::format_parse_context& context) { return context.begin(); }
+  template <class Context>
+  auto format(const knot::as_json<Type>& json, Context& context) const {
+    return knot::write(context.out(), json.value);
+  }
+};
