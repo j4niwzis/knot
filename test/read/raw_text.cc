@@ -126,3 +126,94 @@ TEST(RawRest, IsWrittenBackAmongTheMembers) {
   const open_one got = knot::read<open_one>(R"({"x":[1, 2], "known":"k","y\"q": {"a":null}})");
   EXPECT_EQ(knot::to_json_string(got), R"({"known":"k","x":[1,2],"y\"q":{"a":null}})");
 }
+
+namespace {
+template <class Type>
+auto from_stream(const std::string& text) {
+  std::istringstream input(text);
+  input >> std::noskipws;
+  return knot::try_read<Type>(std::ranges::istream_view<char>(input));
+}
+}  // namespace
+
+TEST(RawStream, CapturesOnlyTheValueAndReadsTheFollowingMember) {
+  const auto got = from_stream<holder>(
+      R"({"anything": {"b" : [1, 2.50,"x\u0041","👍"]}, "after":7})");
+  ASSERT_TRUE(got.has_value());
+  EXPECT_EQ(got->anything.text, R"({"b" : [1, 2.50,"x\u0041","👍"]})");
+  EXPECT_EQ(got->after, 7);
+  const auto scalar = from_stream<knot::raw>(" \"a b\" \n");
+  ASSERT_TRUE(scalar.has_value());
+  EXPECT_EQ(scalar->text, R"("a b")");
+}
+
+TEST(RawStream, RawRestKeepsValuesAndEscapedKeys) {
+  const auto got = from_stream<open_one>(
+      R"({"x":[1, 2], "known":"k","y\"q": {"a":null}})");
+  ASSERT_TRUE(got.has_value());
+  EXPECT_EQ(got->known, "k");
+  EXPECT_EQ(got->rest.text, R"({"x":[1, 2],"y\"q":{"a":null}})");
+}
+
+TEST(RawStream, TaggedContentWorksInEitherOrderAndKeepsFallbacks) {
+  for (const auto text : {
+      R"({"type":"m.room.message","content":{"body":"hi","msgtype":"m.text"},"event_id":"$1"})",
+      R"({"content":{"body":"hi","msgtype":"m.text"},"event_id":"$1","type":"m.room.message"})"}) {
+    const auto got = from_stream<event>(text);
+    ASSERT_TRUE(got.has_value());
+    ASSERT_TRUE(got->content.is<message>());
+    EXPECT_EQ(got->content.as<message>(), (message{"m.text", "hi"}));
+  }
+  for (const auto tag : {"m.room.message", "org.unknown"}) {
+    const auto got = from_stream<event>(
+        std::string(R"({"content": {"msgtype" : 7}, "type":")") + tag +
+        R"(","event_id":"$1"})");
+    ASSERT_TRUE(got.has_value());
+    ASSERT_TRUE(got->content.is<knot::raw>());
+    EXPECT_EQ(got->content.as<knot::raw>().text, R"({"msgtype" : 7})");
+  }
+}
+
+TEST(RawStream, JoinsChunksAcrossEscapesNumbersAndUtf8) {
+  const std::string text = R"({"a":"\uD83D\uDC4D👍","b":-2.50e+3})";
+  for (std::size_t split = 0; split <= text.size(); ++split) {
+    const std::array<std::string_view, 2> pieces{
+        std::string_view(text).substr(0, split), std::string_view(text).substr(split)};
+    const auto got = knot::try_read<knot::raw>(pieces | std::views::join);
+    ASSERT_TRUE(got.has_value()) << split;
+    EXPECT_EQ(got->text, text);
+  }
+}
+
+TEST(RawStream, ValidationAndOffsetsAgreeWithMemoryInput) {
+  const std::vector<std::string> texts{
+      R"({"a":[1,]})", R"({"a":"\uD800"})", "[1e+]", "[01]", "true false",
+      std::string("[\"\xff\"]"), std::string(129, '[') + "0" + std::string(129, ']'),
+      R"({"b":1,"a":2})", R"({"a":1,"a":2})", R"({"a":"\u0041"})", "[1, 2]",
+      R"({"a":[1,2],"b":"👍"})"};
+  for (const auto& text : texts) {
+    for (bool canonical : {false, true}) {
+      std::istringstream input(text);
+      input >> std::noskipws;
+      auto chars = std::ranges::istream_view<char>(input);
+      const auto streamed = canonical ? knot::try_read<knot::raw>(chars, knot::canonical)
+                                      : knot::try_read<knot::raw>(chars);
+      const auto memory = canonical ? knot::try_read<knot::raw>(text, knot::canonical)
+                                    : knot::try_read<knot::raw>(text);
+      ASSERT_EQ(streamed.has_value(), memory.has_value()) << text;
+      if (memory) EXPECT_EQ(streamed->text, memory->text);
+      else {
+        EXPECT_EQ(streamed.error().offset, memory.error().offset) << text;
+        EXPECT_EQ(streamed.error().message, memory.error().message) << text;
+      }
+    }
+  }
+}
+
+constexpr bool raw_from_a_view_at_compile_time() {
+  constexpr std::string_view text = R"({"a":"\u0041"})";
+  auto chars = text | std::views::transform([](char c) { return c; });
+  auto got = knot::try_read<knot::raw>(chars);
+  return got && got->text == text;
+}
+static_assert(raw_from_a_view_at_compile_time());

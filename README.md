@@ -90,6 +90,17 @@ In both, a key the type does not have is passed over, a key twice is refused,
 text that is not UTF-8 is refused, and nesting in what is passed over stops at
 128.
 
+`knot::raw` retains one value's original JSON spelling, including whitespace
+inside that value. It works with contiguous text, single-pass streams, and
+joined chunks, both as a member and as a rest member or tagged fallback.
+Streaming capture buffers only the retained value and uses the same JSON
+validation and source offsets as reading text in memory. For example:
+
+```cpp
+input >> std::noskipws;
+auto original = knot::read<knot::raw>(std::ranges::istream_view<char>(input));
+```
+
 ## Content chosen by a key: `knot::tagged`
 
 ```cpp
@@ -130,7 +141,28 @@ for (std::string_view piece : knot::to_json(value).chunks()) send(piece);
 
 A lazy view of the document's characters, made as they are pulled, in
 Canonical JSON: keys sorted, only the escapes it must have, absent optionals
-left out. The pieces point into the value where they can.
+left out. The pieces point into the value where they can. Container state uses
+a variant of the concrete types reachable from the document, with no virtual
+dispatch.
+Eight nested containers fit inline; deeper documents use a growable stack
+whose capacity is reused across siblings. An rvalue is owned inline by the
+view. Moving a view invalidates its iterators; `begin()` starts again.
+
+For output that can consume a whole piece at a time, a concrete callable can
+receive the pieces directly, without a lazy traversal stack or a temporary
+JSON string:
+
+```cpp
+knot::write_chunks([&](std::string_view piece) {
+  output.write(piece.data(), piece.size());
+}, value);
+```
+
+Each piece is borrowed for the duration of the call. A sink must consume or
+copy it before returning; a thrown exception stops writing. The existing
+output-iterator `write(out, value)` and `std::format` adapter use this direct
+writer too. Their traversal does not allocate; the sink and merging retained
+unknown fields may still allocate.
 
 Where the whole is wanted at once, the eager writer is several times faster --
 no view, no pieces, the string appended to directly:

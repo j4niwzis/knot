@@ -818,12 +818,14 @@ constexpr bool pass_over(Cursor& in, int depth = 0) {
       std::string previous;
       for (bool first = true;; first = false) {
         const std::size_t at = in.offset();
-        if (!read_string<Canonical>(in, scratch)) return false;
         if constexpr (Canonical) {
+          if (!read_string<Canonical>(in, scratch)) return false;
           if (!first && !(previous < scratch)) {
             return in.fail_at("knot: keys out of order", at);
           }
-          previous = scratch;
+          previous.swap(scratch);
+        } else {
+          if (!read_string_into<Canonical>(in, no_sink{})) return false;
         }
         space<Canonical>(in);
         if (!in.expect(':', "knot: expected ':'")) return false;
@@ -867,6 +869,50 @@ constexpr bool pass_over(Cursor& in, int depth = 0) {
         return true;
       }
     }
+  }
+}
+
+// Capture only the value being retained. The underlying cursor remains the
+// source of positions and errors; input iterators are never copied or rewound.
+// In-memory input keeps its span fast path instead of copying byte by byte.
+template <class Cursor>
+class capturing_cursor {
+ public:
+  static constexpr bool in_memory = false;
+  constexpr capturing_cursor(Cursor& in, std::string& text) : in_(in), text_(text) {}
+  constexpr int peek() const { return in_.peek(); }
+  constexpr std::size_t offset() const { return in_.offset(); }
+  constexpr void next() {
+    text_ += static_cast<char>(in_.peek());
+    in_.next();
+  }
+  constexpr bool fail(std::string_view why) { return in_.fail(why); }
+  constexpr bool fail_at(std::string_view why, std::size_t at) { return in_.fail_at(why, at); }
+  constexpr bool expect(char wanted, std::string_view why) {
+    if (peek() != static_cast<unsigned char>(wanted)) return fail(why);
+    next();
+    return true;
+  }
+  constexpr bool literal(std::string_view wanted, std::string_view why) {
+    for (char letter : wanted) if (!expect(letter, why)) return false;
+    return true;
+  }
+
+ private:
+  Cursor& in_;
+  std::string& text_;
+};
+
+template <bool Canonical, class Cursor>
+constexpr bool capture_raw(Cursor& in, std::string& text) {
+  if constexpr (Cursor::in_memory) {
+    const std::string_view before = in.rest();
+    if (!pass_over<Canonical>(in)) return false;
+    text.append(before.data(), before.size() - in.rest().size());
+    return true;
+  } else {
+    capturing_cursor capture(in, text);
+    return pass_over<Canonical>(capture);
   }
 }
 
@@ -1104,15 +1150,12 @@ constexpr void put_json_text(std::string& out, std::string_view text) {
 
 template <bool Canonical, class Cursor, class At>
 constexpr bool keep_rest(Cursor& in, raw& kept, std::string_view key, const At&) {
-  static_assert(Cursor::in_memory, "knot: a knot::raw rest is read from text in memory");
   if (kept.text.empty()) kept.text = "{}";
   kept.text.pop_back();
   if (kept.text.size() > 1) kept.text += ',';
   put_json_text(kept.text, key);
   kept.text += ':';
-  const std::string_view before = in.rest();
-  if (!pass_over<Canonical>(in)) return false;
-  kept.text.append(before.data(), before.size() - in.rest().size());
+  if (!capture_raw<Canonical>(in, kept.text)) return false;
   kept.text += '}';
   return true;
 }
@@ -2711,12 +2754,8 @@ constexpr bool read_value(Cursor& in, Type& out) {
   } else if constexpr (std::same_as<Type, value>) {
     return read_any<Canonical>(in, out);
   } else if constexpr (std::same_as<Type, raw>) {
-    // Passed over, and the span it took kept: the text must be in memory.
-    static_assert(Cursor::in_memory, "knot: knot::raw is read from text in memory");
-    const std::string_view before = in.rest();
-    if (!pass_over<Canonical>(in)) return false;
-    out.text.assign(before.data(), before.size() - in.rest().size());
-    return true;
+    out.text.clear();
+    return capture_raw<Canonical>(in, out.text);
   } else if constexpr (is_by<Type>::value) {
     out.reading = {};
     return read_by<Canonical>(in, out);

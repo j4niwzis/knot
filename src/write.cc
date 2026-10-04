@@ -37,71 +37,33 @@ constexpr bool rest_empty(const raw& kept) { return kept.text.empty() || kept.te
 
 namespace knot::detail::lazy {
 
-struct step;
-
-// Something being written, asked for what comes next.
-struct frame {
-  constexpr virtual ~frame() = default;
-  constexpr virtual step next() = 0;
-};
-
-// What a frame says next: a piece of text, a frame to go into, or that it is
-// done.
-//
-// A string or a number to be written is said as such rather than as a frame
-// of its own: the machine writes it with what it keeps for the purpose, so
-// that a leaf costs no allocation -- only an array, a map or an object does.
+// Leaves are described without a frame. Container frames keep their concrete
+// types in the machine's variant; entering a child never allocates a frame.
 struct step {
-  enum class what { piece, child, done, string, integer, floating } kind = what::done;
+  enum class what { piece, child, done, string, integer, natural, floating } kind = what::done;
   std::string_view text;
-  std::unique_ptr<frame> child;
   std::int64_t integer = 0;
   double floating = 0;
+  std::uint64_t natural = 0;
 
-  static constexpr step piece(std::string_view text) { return {what::piece, text, {}}; }
-  static constexpr step into(std::unique_ptr<frame> child) {
-    return {what::child, {}, std::move(child)};
-  }
+  static constexpr step piece(std::string_view text) { return {what::piece, text}; }
+  static constexpr step into() { return {what::child, {}}; }
   static constexpr step done() { return {}; }
-  static constexpr step string(std::string_view text) { return {what::string, text, {}}; }
-  static constexpr step whole(std::int64_t number) {
-    return {what::integer, {}, {}, number};
-  }
-  static constexpr step fraction(double number) {
-    return {what::floating, {}, {}, 0, number};
-  }
+  static constexpr step string(std::string_view text) { return {what::string, text}; }
+  static constexpr step whole(std::int64_t number) { return {what::integer, {}, number}; }
+  static constexpr step whole(std::uint64_t number) { return {what::natural, {}, 0, 0, number}; }
+  static constexpr step fraction(double number) { return {what::floating, {}, 0, number}; }
 };
 
-template <class Type>
-constexpr std::unique_ptr<frame> frame_for(const Type& value);
-
-template <class Type>
-constexpr step child_step(const Type& value) {
-  if constexpr (std::same_as<Type, std::string>) {
-    return step::string(value);
-  } else if constexpr (std::same_as<Type, bool>) {
-    return step::piece(value ? "true" : "false");
-  } else if constexpr (std::same_as<Type, std::nullptr_t>) {
-    return step::piece("null");
-  } else if constexpr (json_integer<Type>) {
-    return step::whole(static_cast<std::int64_t>(value));
-  } else if constexpr (std::same_as<Type, double>) {
-    return step::fraction(value);
-  } else if constexpr (is_choice<Type>::value) {
-    return step::string(choice<Type>::name(value));
-  } else if constexpr (is_optional<Type>::value) {
-    return child_step(*value);
-  } else {
-    return step::into(frame_for(value));
-  }
-}
+template <class Type, class Machine>
+constexpr step child_step(const Type& value, Machine& machine);
 
 // A string: its quotes, runs that need nothing, and the escapes between them.
-class string_frame final : public frame {
+class string_frame {
  public:
   constexpr explicit string_frame(std::string_view text) : text_(text) {}
 
-  constexpr step next() override {
+  constexpr step next() {
     if (!opened_) {
       opened_ = true;
       return step::piece("\"");
@@ -148,36 +110,14 @@ class string_frame final : public frame {
   bool closed_ = false;
 };
 
-// One piece and done: a number, true, false.
-class piece_frame final : public frame {
- public:
-  constexpr explicit piece_frame(std::string_view text) : text_(text) {}
-  template <class Integer>
-  constexpr explicit piece_frame(Integer value) {
-    const auto made = std::to_chars(digits_.data(),
-                                    digits_.data() + digits_.size(), value);
-    text_ = std::string_view(digits_.data(), made.ptr);
-  }
-
-  constexpr step next() override {
-    if (said_) return step::done();
-    said_ = true;
-    return step::piece(text_);
-  }
-
- private:
-  std::array<char, 32> digits_{};
-  std::string_view text_;
-  bool said_ = false;
-};
-
 template <class Element, class Allocator>
-class array_frame final : public frame {
+class array_frame {
  public:
   constexpr explicit array_frame(const std::vector<Element, Allocator>& values)
       : values_(values) {}
 
-  constexpr step next() override {
+  template <class Machine>
+  constexpr step next(Machine& machine) {
     if (!opened_) {
       opened_ = true;
       return step::piece("[");
@@ -192,7 +132,7 @@ class array_frame final : public frame {
       return step::piece(",");
     }
     comma_ = false;
-    return child_step(values_[at_++]);
+    return child_step(values_[at_++], machine);
   }
 
  private:
@@ -206,12 +146,13 @@ class array_frame final : public frame {
 // An object whose keys are the data, in the map's order -- which for a map
 // from strings is the order of their bytes, Canonical JSON's.
 template <class Map>
-class map_frame final : public frame {
+class map_frame {
  public:
   constexpr explicit map_frame(const Map& values)
       : values_(values), at_(values.begin()) {}
 
-  constexpr step next() override {
+  template <class Machine>
+  constexpr step next(Machine& machine) {
     if (!opened_) {
       opened_ = true;
       return step::piece("{");
@@ -235,7 +176,7 @@ class map_frame final : public frame {
       return step::piece(":");
     }
     stage_ = 0;
-    return child_step((at_++)->second);
+    return child_step((at_++)->second, machine);
   }
 
  private:
@@ -248,11 +189,12 @@ class map_frame final : public frame {
 
 // An object: each key in its order with what is around it, then its value.
 template <class Type>
-class object_frame final : public frame {
+class object_frame {
  public:
   constexpr explicit object_frame(const Type& value) : value_(value) {}
 
-  constexpr step next() override {
+  template <class Machine>
+  constexpr step next(Machine& machine) {
     constexpr std::size_t size = schema<Type>::size;
     if (!opened_) {
       opened_ = true;
@@ -276,7 +218,7 @@ class object_frame final : public frame {
     }
     keyed_ = false;
     ++written_;
-    return member(at_++);
+    return member(at_++, machine);
   }
 
  private:
@@ -291,17 +233,18 @@ class object_frame final : public frame {
     return key_of(rank, std::make_index_sequence<schema<Type>::size>{});
   }
 
-  template <std::size_t... Rank>
-  constexpr step member_of(std::size_t rank, std::index_sequence<Rank...>) const {
+  template <class Machine, std::size_t... Rank>
+  constexpr step member_of(std::size_t rank, Machine& machine, std::index_sequence<Rank...>) const {
     step found;
     (void)((rank == Rank
-          ? (found = child_step(boost::pfr::get<order_of<Type>[Rank]>(value_)), true)
+          ? (found = child_step(boost::pfr::get<order_of<Type>[Rank]>(value_), machine), true)
           : false) ||
      ...);
     return found;
   }
-  constexpr step member(std::size_t rank) const {
-    return member_of(rank, std::make_index_sequence<schema<Type>::size>{});
+  template <class Machine>
+  constexpr step member(std::size_t rank, Machine& machine) const {
+    return member_of(rank, machine, std::make_index_sequence<schema<Type>::size>{});
   }
 
   template <std::size_t... Rank>
@@ -339,82 +282,167 @@ class object_frame final : public frame {
   bool closed_ = false;
 };
 
-// A tree made for the writing, kept for as long as it is written.
-class owned_frame final : public frame {
+// Merging unknown keys still needs a tree. Its address stays stable when the
+// traversal stack grows; ordinary typed values never take this path.
+class owned_frame {
  public:
-  explicit owned_frame(knot::value tree) : tree_(std::move(tree)) {}
+  explicit owned_frame(knot::value tree)
+      : tree_(std::make_unique<knot::value>(std::move(tree))) {}
 
-  constexpr step next() override {
+  template <class Machine>
+  constexpr step next(Machine& machine) {
     if (started_) return step::done();
     started_ = true;
-    return step::into(frame_for(tree_));
+    return child_step(*tree_, machine);
   }
 
  private:
-  knot::value tree_;
+  std::unique_ptr<knot::value> tree_;
   bool started_ = false;
 };
 
-template <class Type>
-constexpr std::unique_ptr<frame> frame_for(const Type& value) {
+template <class Type, class Machine>
+constexpr step child_step(const Type& value, Machine& machine) {
   if constexpr (requires { value.reading; value.data(); }) {
-    // A knot::tagged: the alternative it holds -- with what it did not have laid
-    // back in, where there is any.
-    if (!value.unknown.is_null()) return std::make_unique<owned_frame>(as_tree(value));
-    return splice::visit([](const auto& held) { return frame_for(held); },
-                      value.data());
+    if (!value.unknown.is_null())
+      return machine.template enter<owned_frame>(as_tree(value));
+    return splice::visit([&](const auto& held) { return child_step(held, machine); },
+                         value.data());
   } else if constexpr (std::same_as<Type, knot::value>) {
-    return splice::visit([](const auto& held) { return frame_for(held); },
-                      value.data());
+    return splice::visit([&](const auto& held) { return child_step(held, machine); },
+                         value.data());
   } else if constexpr (std::same_as<Type, knot::raw>) {
-    return std::make_unique<piece_frame>(std::string_view(value.text));
+    return step::piece(value.text);
   } else if constexpr (std::same_as<Type, std::nullptr_t>) {
-    return std::make_unique<piece_frame>(std::string_view("null"));
+    return step::piece("null");
   } else if constexpr (std::same_as<Type, double>) {
-    // Not Canonical JSON, which has no such numbers: the shortest text that
-    // reads back as the same double.
-    return std::make_unique<piece_frame>(value);
+    return step::fraction(value);
   } else if constexpr (std::same_as<Type, std::string>) {
-    return std::make_unique<string_frame>(value);
+    return step::string(value);
   } else if constexpr (is_choice<Type>::value) {
-    return std::make_unique<string_frame>(choice<Type>::name(value));
+    return step::string(choice<Type>::name(value));
   } else if constexpr (std::same_as<Type, bool>) {
-    return std::make_unique<piece_frame>(value ? std::string_view("true")
-                                               : std::string_view("false"));
+    return step::piece(value ? "true" : "false");
   } else if constexpr (json_integer<Type>) {
-    return std::make_unique<piece_frame>(value);
+    if constexpr (std::is_signed_v<Type>) return step::whole(static_cast<std::int64_t>(value));
+    else return step::whole(static_cast<std::uint64_t>(value));
   } else if constexpr (is_optional<Type>::value) {
-    // Only asked of one that holds something.
-    return frame_for(*value);
+    return value ? child_step(*value, machine) : step::piece("null");
   } else if constexpr (is_map<Type>::value) {
-    return std::make_unique<map_frame<Type>>(value);
+    return machine.template enter<map_frame<Type>>(value);
   } else if constexpr (is_vector<Type>::value) {
-    return std::make_unique<array_frame<typename Type::value_type,
-                                        typename Type::allocator_type>>(value);
+    return machine.template enter<array_frame<typename Type::value_type,
+                                             typename Type::allocator_type>>(value);
   } else if constexpr (described<Type>) {
     if constexpr (keeps_rest<Type>) {
       const auto& kept = boost::pfr::get<schema_of<Type>.rest_member()>(value);
-      if (!rest_empty(kept)) {
-        return std::make_unique<owned_frame>(to_value(value));
-      }
+      if (!rest_empty(kept)) return machine.template enter<owned_frame>(to_value(value));
     }
-    return std::make_unique<object_frame<Type>>(value);
+    return machine.template enter<object_frame<Type>>(value);
   } else {
     static_assert(false, "knot: this type has no JSON form");
   }
 }
 
-// The frames being written, innermost last.
+template <class... Types>
+struct types {};
+template <class... Left, class... Right>
+consteval types<Left..., Right...> operator+(types<Left...>, types<Right...>) { return {}; }
+
+template <name Tag, class... Alternatives>
+consteval auto alternatives_of(tagged<Tag, Alternatives...>*) {
+  return types<Alternatives..., knot::value>{};
+}
+
+// Walk the type graph once, including cycles through vectors or value. Only
+// frames reachable from this document belong to its machine's variant.
+template <class Type>
+consteval auto children_of() {
+  if constexpr (is_optional<Type>::value || is_vector<Type>::value) {
+    return types<typename Type::value_type>{};
+  } else if constexpr (is_map<Type>::value) {
+    return types<typename Type::mapped_type>{};
+  } else if constexpr (std::same_as<Type, knot::value>) {
+    return types<knot::value::array, knot::value::object>{};
+  } else if constexpr (requires(const Type& value) { value.reading; value.data(); }) {
+    return alternatives_of(static_cast<Type*>(nullptr));
+  } else if constexpr (described<Type>) {
+    auto members = []<std::size_t... At>(std::index_sequence<At...>) {
+      return types<std::remove_cvref_t<decltype(boost::pfr::get<At>(
+          std::declval<const Type&>()))>...>{};
+    }(std::make_index_sequence<schema<Type>::size>{});
+    if constexpr (keeps_rest<Type>) return members + types<knot::value>{};
+    else return members;
+  } else {
+    return types<>{};
+  }
+}
+
+template <class Pending, class Seen = types<>>
+struct reachable;
+template <class... Seen>
+struct reachable<types<>, types<Seen...>> { using type = types<Seen...>; };
+template <class Type, class... Rest, class... Seen>
+struct reachable<types<Type, Rest...>, types<Seen...>> {
+  static consteval auto next() {
+    if constexpr ((std::same_as<Type, Seen> || ...)) {
+      return std::type_identity<reachable<types<Rest...>, types<Seen...>>>{};
+    } else {
+      return std::type_identity<reachable<decltype(children_of<Type>() + types<Rest...>{}),
+                                          types<Seen..., Type>>>{};
+    }
+  }
+  using type = typename decltype(next())::type::type;
+};
+
+template <class Type>
+consteval auto frames_of() {
+  if constexpr (std::same_as<Type, knot::value>) return types<owned_frame>{};
+  else if constexpr (is_map<Type>::value) return types<map_frame<Type>>{};
+  else if constexpr (is_vector<Type>::value)
+    return types<array_frame<typename Type::value_type, typename Type::allocator_type>>{};
+  else if constexpr (described<Type>) return types<object_frame<Type>>{};
+  else return types<>{};
+}
+
+template <class... Frames>
+consteval auto variant_of(types<Frames...>) {
+  return std::type_identity<std::variant<Frames...>>{};
+}
+template <class... Types>
+consteval auto state_of(types<Types...>) {
+  return variant_of((types<std::monostate>{} + ... + frames_of<Types>()));
+}
+
+// Eight nested containers fit inline. Deeper documents grow one contiguous
+// overflow stack, reused across siblings, instead of allocating each frame.
+template <class Root>
 class machine {
+  using state = typename decltype(state_of(typename reachable<types<Root>>::type{}))::type;
+  static constexpr std::size_t inline_depth = 8;
+
  public:
-  constexpr machine() = default;
-  constexpr explicit machine(std::unique_ptr<frame> outermost) {
-    stack_.push_back(std::move(outermost));
+  constexpr void start(const Root& value) {
+    reset();
+    first_ = child_step(value, *this);
+  }
+
+  constexpr void reset() {
+    overflow_.clear();
+    while (depth_ != 0) inline_[--depth_].reset();
+    pending_.reset();
+    string_.reset();
+    first_.reset();
+  }
+
+  template <class Frame, class Value>
+  constexpr step enter(Value&& value) {
+    pending_.emplace(std::in_place_type<Frame>, std::forward<Value>(value));
+    return step::into();
   }
 
   constexpr std::optional<std::string_view> next() {
     for (;;) {
-      // A string being written goes first, piece by piece.
       if (string_) {
         const step one = string_->next();
         if (one.kind == step::what::done) {
@@ -424,17 +452,33 @@ class machine {
         if (!one.text.empty()) return one.text;
         continue;
       }
-      if (stack_.empty()) return std::nullopt;
-      step one = stack_.back()->next();
+      step one;
+      if (first_) {
+        one = *first_;
+        first_.reset();
+      } else {
+        if (depth_ == 0) return std::nullopt;
+        auto& top = overflow_.empty() ? *inline_[depth_ - 1] : overflow_.back();
+        one = std::visit([&](auto& frame) -> step {
+          if constexpr (std::same_as<std::remove_cvref_t<decltype(frame)>, std::monostate>)
+            return step::done();
+          else return frame.next(*this);
+        }, top);
+      }
       switch (one.kind) {
         case step::what::piece:
           if (!one.text.empty()) return one.text;
           break;
         case step::what::child:
-          stack_.push_back(std::move(one.child));
+          // Grow only after next() returns, so no visited frame is relocated
+          // while its member function is running.
+          if (depth_ < inline_depth) inline_[depth_++].emplace(std::move(*pending_));
+          else overflow_.push_back(std::move(*pending_));
+          pending_.reset();
           break;
         case step::what::done:
-          stack_.pop_back();
+          if (!overflow_.empty()) overflow_.pop_back();
+          else if (depth_ != 0) inline_[--depth_].reset();
           break;
         case step::what::string:
           string_.emplace(one.text);
@@ -442,6 +486,11 @@ class machine {
         case step::what::integer: {
           const auto made = std::to_chars(digits_.data(), digits_.data() + digits_.size(),
                                           one.integer);
+          return std::string_view(digits_.data(), made.ptr);
+        }
+        case step::what::natural: {
+          const auto made = std::to_chars(digits_.data(), digits_.data() + digits_.size(),
+                                          one.natural);
           return std::string_view(digits_.data(), made.ptr);
         }
         case step::what::floating: {
@@ -454,8 +503,11 @@ class machine {
   }
 
  private:
-  std::vector<std::unique_ptr<frame>> stack_;
-  // What a leaf is written with: no frame of its own.
+  std::array<std::optional<state>, inline_depth> inline_;
+  std::vector<state> overflow_;
+  std::size_t depth_ = 0;
+  std::optional<state> pending_;
+  std::optional<step> first_;
   std::optional<string_frame> string_;
   std::array<char, 32> digits_{};
 };
@@ -536,10 +588,27 @@ class json_view : public std::ranges::view_interface<json_view<Type>> {
 
   constexpr explicit json_view(const Type& value) : value_(&value) {}
   constexpr explicit json_view(Type&& value)
-      : owned_(std::make_unique<Type>(std::move(value))),
-        value_(owned_.get()) {}
-  json_view(json_view&&) = default;
-  json_view& operator=(json_view&&) = default;
+      : owned_(std::in_place, std::move(value)), value_(&*owned_) {}
+
+  // Moving a view invalidates its iterators. begin() starts a fresh traversal,
+  // with every reference rebound to the destination's inline-owned value.
+  constexpr json_view(json_view&& other) {
+    if (other.owned_) owned_.emplace(std::move(*other.owned_));
+    value_ = owned_ ? &*owned_ : other.value_;
+    other.machine_.reset();
+  }
+  constexpr json_view& operator=(json_view&& other) {
+    if (this == &other) return *this;
+    machine_.reset();
+    other.machine_.reset();
+    owned_.reset();
+    if (other.owned_) owned_.emplace(std::move(*other.owned_));
+    value_ = owned_ ? &*owned_ : other.value_;
+    piece_ = {};
+    at_ = 0;
+    done_ = true;
+    return *this;
+  }
 
   constexpr iterator begin() {
     start();
@@ -552,7 +621,7 @@ class json_view : public std::ranges::view_interface<json_view<Type>> {
 
  private:
   constexpr void start() {
-    machine_ = detail::lazy::machine(detail::lazy::frame_for(*value_));
+    machine_.start(*value_);
     done_ = false;
   }
   constexpr void pull() {
@@ -564,9 +633,9 @@ class json_view : public std::ranges::view_interface<json_view<Type>> {
     }
   }
 
-  std::unique_ptr<Type> owned_;
+  std::optional<Type> owned_;
   const Type* value_ = nullptr;
-  detail::lazy::machine machine_;
+  detail::lazy::machine<Type> machine_;
   std::string_view piece_;
   std::size_t at_ = 0;
   bool done_ = true;
@@ -587,19 +656,6 @@ struct as_json {
 };
 template <class Type>
 as_json(const Type&) -> as_json<Type>;
-
-// A value as Canonical JSON, written through an output iterator a piece at a
-// time, as the lazy view makes them: into whatever the iterator writes to --
-// a byte buffer through a transform, a hash, a file -- with no string made
-// first. The iterator past what was written is given back.
-template <class Type, class Out>
-  requires document<std::remove_cvref_t<Type>> && std::output_iterator<Out, char>
-constexpr Out write(Out out, const Type& value) {
-  auto json = to_json(value);
-  for (const std::string_view piece : json.chunks())
-    out = std::ranges::copy(piece, std::move(out)).out;
-  return out;
-}
 
 }  // namespace knot
 
@@ -624,7 +680,8 @@ constexpr std::string_view escape_of(char letter, std::array<char, 6>& room) {
   }
 }
 
-constexpr void put_string(std::string& out, std::string_view text) {
+template <class Out>
+constexpr void put_string(Out& out, std::string_view text) {
   out += '"';
   while (!text.empty()) {
     const std::size_t run = string_run(text);
@@ -639,18 +696,18 @@ constexpr void put_string(std::string& out, std::string_view text) {
   out += '"';
 }
 
-template <class Type>
-constexpr void put(std::string& out, const Type& value);
+template <class Out, class Type>
+constexpr void put(Out& out, const Type& value);
 
-template <class Number>
-constexpr void put_number(std::string& out, Number number) {
+template <class Out, class Number>
+constexpr void put_number(Out& out, Number number) {
   std::array<char, 32> digits{};
   const auto made = std::to_chars(digits.data(), digits.data() + digits.size(), number);
-  out.append(digits.data(), made.ptr);
+  out.append(std::string_view(digits.data(), made.ptr));
 }
 
-template <class Type>
-constexpr void put(std::string& out, const Type& value) {
+template <class Out, class Type>
+constexpr void put(Out& out, const Type& value) {
   if constexpr (requires { value.reading; value.data(); }) {
     if (!value.unknown.is_null()) {
       put(out, as_tree(value));
@@ -672,7 +729,8 @@ constexpr void put(std::string& out, const Type& value) {
   } else if constexpr (is_choice<Type>::value) {
     put_string(out, choice<Type>::name(value));
   } else if constexpr (is_optional<Type>::value) {
-    put(out, *value);
+    if (value) put(out, *value);
+    else out += "null";
   } else if constexpr (is_vector<Type>::value) {
     out += '[';
     bool first = true;
@@ -725,9 +783,46 @@ constexpr void put(std::string& out, const Type& value) {
   }
 }
 
+// The same typed writer can hand each piece directly to a concrete sink.
+// Pieces are borrowed only for the duration of the call.
+template <class Sink>
+class chunk_output {
+ public:
+  constexpr explicit chunk_output(Sink& sink) : sink_(sink) {}
+  constexpr void append(std::string_view text) {
+    if (!text.empty()) std::invoke(sink_, text);
+  }
+  constexpr void operator+=(std::string_view text) { append(text); }
+  constexpr void operator+=(char letter) { append({&letter, 1}); }
+
+ private:
+  Sink& sink_;
+};
+
 }  // namespace knot::detail::eager
 
 export namespace knot {
+
+// Push pieces to a file, hash or other sink without buffering the document or
+// constructing a lazy traversal stack. The sink consumes each borrowed piece
+// before returning; exceptions propagate to the caller.
+template <class Sink, class Type>
+  requires document<std::remove_cvref_t<Type>> && std::invocable<Sink&, std::string_view>
+constexpr void write_chunks(Sink&& sink, const Type& value) {
+  detail::eager::chunk_output out(sink);
+  detail::eager::put(out, value);
+}
+
+// The output iterator past the last character is returned. This shares the
+// direct writer with write_chunks(), including its allocation-free traversal.
+template <class Type, class Out>
+  requires document<std::remove_cvref_t<Type>> && std::output_iterator<Out, char>
+constexpr Out write(Out out, const Type& value) {
+  write_chunks([&](std::string_view piece) {
+    out = std::ranges::copy(piece, std::move(out)).out;
+  }, value);
+  return out;
+}
 
 // A value as Canonical JSON, added to the end of a string at once: no view
 // and no pieces, for where the whole is wanted anyway.
