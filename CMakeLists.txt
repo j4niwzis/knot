@@ -32,7 +32,7 @@ set(SPLICE_CONSTEXPR_STEPS ${KNOT_CONSTEXPR_STEPS} CACHE STRING
   "clang's -fconstexpr-steps for splice, as knot sets it")
 cme_declare_port(NAME splice PROVIDES splice
   GITHUB_REPOSITORY j4niwzis/splice
-  GIT_TAG f2c25443061ba5353720eccd0a9438793c2ea053
+  GIT_TAG eb07788f6751dad1636aec9fd6bb134fe03a953f
   LICENSE GPL-3.0-only
   TARGETS splice)
 cme_options(splice "SPLICE_TESTS OFF")

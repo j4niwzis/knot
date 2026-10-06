@@ -306,10 +306,10 @@ constexpr step child_step(const Type& value, Machine& machine) {
   if constexpr (requires { value.reading; value.data(); }) {
     if (!value.unknown.is_null())
       return machine.template enter<owned_frame>(as_tree(value));
-    return splice::visit([&](const auto& held) { return child_step(held, machine); },
+    return spl::visit([&](const auto& held) { return child_step(held, machine); },
                          value.data());
   } else if constexpr (std::same_as<Type, knot::value>) {
-    return splice::visit([&](const auto& held) { return child_step(held, machine); },
+    return spl::visit([&](const auto& held) { return child_step(held, machine); },
                          value.data());
   } else if constexpr (std::same_as<Type, knot::raw>) {
     return step::piece(value.text);
@@ -712,10 +712,10 @@ constexpr void put(Out& out, const Type& value) {
     if (!value.unknown.is_null()) {
       put(out, as_tree(value));
     } else {
-      splice::visit([&](const auto& held) { put(out, held); }, value.data());
+      spl::visit([&](const auto& held) { put(out, held); }, value.data());
     }
   } else if constexpr (std::same_as<Type, knot::value>) {
-    splice::visit([&](const auto& held) { put(out, held); }, value.data());
+    spl::visit([&](const auto& held) { put(out, held); }, value.data());
   } else if constexpr (std::same_as<Type, knot::raw>) {
     out += value.text;
   } else if constexpr (std::same_as<Type, std::nullptr_t>) {

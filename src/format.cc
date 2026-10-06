@@ -143,12 +143,12 @@ consteval bool choice_shape() {
   }
 }
 
-// A choice is a splice::variant or a std::variant of that shape: the same
+// A choice is a spl::variant or a std::variant of that shape: the same
 // reading and writing for both.
 template <class Type>
 struct is_choice : std::false_type {};
 template <class... Alternatives>
-struct is_choice<splice::variant<Alternatives...>>
+struct is_choice<spl::variant<Alternatives...>>
     : std::bool_constant<choice_shape<Alternatives...>()> {};
 template <class... Alternatives>
 struct is_choice<std::variant<Alternatives...>>
@@ -218,7 +218,7 @@ struct choice_of {
 template <class Type>
 struct choice;
 template <class... Alternatives>
-struct choice<splice::variant<Alternatives...>> : choice_of<splice::variant<Alternatives...>, Alternatives...> {};
+struct choice<spl::variant<Alternatives...>> : choice_of<spl::variant<Alternatives...>, Alternatives...> {};
 template <class... Alternatives>
 struct choice<std::variant<Alternatives...>> : choice_of<std::variant<Alternatives...>, Alternatives...> {};
 

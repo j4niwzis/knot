@@ -80,8 +80,8 @@ struct maker {
 
   void write(std::string& out, const knot::value& one) {
     out += space();
-    splice::visit(
-        splice::overloaded{
+    spl::visit(
+        spl::overloaded{
             [&](std::nullptr_t) { out += "null"; },
             [&](bool held) { out += held ? "true" : "false"; },
             [&](std::int64_t held) {

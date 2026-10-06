@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A choice held in a splice::variant: read and written as a std::variant one is.
+// A choice held in a spl::variant: read and written as a std::variant one is.
 import std;
 import splice;
 import knot;
@@ -17,7 +17,7 @@ struct values {
     static constexpr std::string_view json_value = "leave";
   };
 };
-using membership_t = splice::variant<values::join, values::leave, std::string>;
+using membership_t = spl::variant<values::join, values::leave, std::string>;
 
 struct member {
   membership_t membership;
@@ -38,7 +38,7 @@ TEST(SpliceChoice, KeepsAnUnknownOne) {
   const auto got = knot::try_read<member>(R"({"membership":"knock"})");
   ASSERT_TRUE(got.has_value());
   ASSERT_EQ(got->membership.index(), 2u);
-  EXPECT_EQ(splice::get<std::string>(got->membership), "knock");
+  EXPECT_EQ(spl::get<std::string>(got->membership), "knock");
 }
 
 TEST(SpliceChoice, WritesBack) {
