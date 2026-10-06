@@ -179,7 +179,7 @@ TEST(RawStream, JoinsChunksAcrossEscapesNumbersAndUtf8) {
   for (std::size_t split = 0; split <= text.size(); ++split) {
     const std::array<std::string_view, 2> pieces{
         std::string_view(text).substr(0, split), std::string_view(text).substr(split)};
-    const auto got = knot::try_read<knot::raw>(pieces | std::views::join);
+    const auto got = knot::try_read<knot::raw>(std::views::join(pieces));
     ASSERT_TRUE(got.has_value()) << split;
     EXPECT_EQ(got->text, text);
   }
@@ -212,7 +212,7 @@ TEST(RawStream, ValidationAndOffsetsAgreeWithMemoryInput) {
 
 constexpr bool raw_from_a_view_at_compile_time() {
   constexpr std::string_view text = R"({"a":"\u0041"})";
-  auto chars = text | std::views::transform([](char c) { return c; });
+  auto chars = std::views::transform(text, [](char c) { return c; });
   auto got = knot::try_read<knot::raw>(chars);
   return got && got->text == text;
 }

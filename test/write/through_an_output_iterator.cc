@@ -25,7 +25,7 @@ TEST(Write, ThroughAnOutputIterator) {
     as_byte operator++(int) { return *this; }
   };
   (void)knot::write(as_byte{into}, value);
-  const std::string written = bytes | std::views::transform([](std::uint8_t b) { return std::bit_cast<char>(b); }) |
+  const std::string written = std::views::transform(bytes, [](std::uint8_t b) { return std::bit_cast<char>(b); }) |
                               std::ranges::to<std::string>();
   EXPECT_EQ(written, knot::to_json_string(value));
 }

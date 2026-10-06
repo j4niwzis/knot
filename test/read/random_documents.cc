@@ -139,7 +139,7 @@ TEST(ReadRandom, MadeUpDocuments) {
     if (round % 5 == 0) {
       std::vector<std::string> pieces;
       for (std::size_t at = 0; at < text.size(); at += 3) pieces.push_back(text.substr(at, 3));
-      const auto piecewise = knot::try_read<holder>(pieces | std::views::join);
+      const auto piecewise = knot::try_read<holder>(std::views::join(pieces));
       ASSERT_TRUE(piecewise) << text;
       ASSERT_TRUE(piecewise->any == original) << text;
     }

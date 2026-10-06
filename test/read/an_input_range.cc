@@ -18,7 +18,7 @@ TEST(Read, AnInputRange) {
 
   const std::vector<std::string> pieces{R"({"content":"h)", R"(i","depth")",
                                         R"(:3,"prev":["$a"]})"};
-  const auto joined = strict<event>(pieces | std::views::join);
+  const auto joined = strict<event>(std::views::join(pieces));
   ASSERT_TRUE(joined) << joined.error().message;
   EXPECT_EQ(joined->prev, (std::vector<std::string>{"$a"}));
 }

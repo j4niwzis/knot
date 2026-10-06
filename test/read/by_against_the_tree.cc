@@ -195,7 +195,7 @@ TEST(ByRandom, AgreesWithTheTreeThenTyped) {
     if (round % 7 == 0) {
       std::vector<std::string> pieces;
       for (std::size_t at = 0; at < text.size(); at += 5) pieces.push_back(text.substr(at, 5));
-      const auto piecewise = knot::try_read<typed_event>(pieces | std::views::join);
+      const auto piecewise = knot::try_read<typed_event>(std::views::join(pieces));
       ASSERT_TRUE(piecewise) << text;
       ASSERT_EQ(knot::to_json_string(*piecewise), knot::to_json_string(*by)) << text;
     }
