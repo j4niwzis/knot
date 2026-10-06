@@ -42,7 +42,7 @@ TEST(ReadRest, KeysTheTypeDoesNotHaveAreKept) {
   EXPECT_EQ(canonical,
             R"({"event_id":"$e","origin_server_ts":7,"state_key":"","type":"m.room.name",)"
             R"("unsigned":{"age":5,"x":[1,null]},"z":true})");
-  EXPECT_EQ(knot::to_json(*got) | std::ranges::to<std::string>(), canonical);
+  EXPECT_EQ(std::ranges::to<std::string>(knot::to_json(*got)), canonical);
   const auto again = knot::try_read<kept_event>(canonical, knot::canonical);
   ASSERT_TRUE(again) << again.error().message << " at " << again.error().offset;
   EXPECT_EQ(knot::to_json_string(*again), canonical);

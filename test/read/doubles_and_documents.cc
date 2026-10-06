@@ -77,7 +77,7 @@ TEST(Read, Documents) {
   EXPECT_FALSE(knot::try_read<std::vector<std::int64_t>>("[1,"));
   EXPECT_FALSE(knot::try_read<std::vector<std::int64_t>>("[1] 2"));
   EXPECT_FALSE(strict<std::vector<std::int64_t>>("[1, 2]"));
-  EXPECT_EQ(knot::to_json(*list) | std::ranges::to<std::string>(), "[1,2,3]");
+  EXPECT_EQ(std::ranges::to<std::string>(knot::to_json(*list)), "[1,2,3]");
 }
 
 }  // namespace

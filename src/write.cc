@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // knot.write: a described value as its Canonical JSON, lazily.
 //
-//   std::string text = knot::to_json(event) | std::ranges::to<std::string>();
+//   std::string text = std::ranges::to<std::string>(knot::to_json(event));
 //   for (std::string_view piece : knot::to_json(event).chunks()) send(piece);
 //
 // The document is made as it is pulled, piece by piece -- a key with what

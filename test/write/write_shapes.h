@@ -46,7 +46,7 @@ namespace {
 using shapes::event;
 
 constexpr std::string json(const auto& value) {
-  return knot::to_json(value) | std::ranges::to<std::string>();
+  return std::ranges::to<std::string>(knot::to_json(value));
 }
 
 }  // namespace

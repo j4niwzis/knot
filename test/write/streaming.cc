@@ -72,12 +72,12 @@ TEST(StreamingWrite, MovingAnOwnedViewRebindsSmallStrings) {
   auto it = source.begin();
   ++it;
   auto moved = std::move(source);
-  EXPECT_EQ(moved | std::ranges::to<std::string>(),
+  EXPECT_EQ(std::ranges::to<std::string>(moved),
             R"({"content":"small","depth":1,"prev":["a"]})");
 
   auto assigned = knot::to_json(event{"discard", 9, {}});
   assigned = std::move(moved);
-  EXPECT_EQ(assigned | std::ranges::to<std::string>(),
+  EXPECT_EQ(std::ranges::to<std::string>(assigned),
             R"({"content":"small","depth":1,"prev":["a"]})");
 }
 
@@ -113,8 +113,8 @@ TEST(StreamingWrite, OwnedMergedTreesSurviveStackGrowthAndRestart) {
   // Discard a traversal after it has entered the overflow stack and merged
   // tree, then restart from the value now owned by the destination view.
   auto moved = std::move(view);
-  EXPECT_EQ(moved | std::ranges::to<std::string>(), expected);
-  EXPECT_EQ(moved | std::ranges::to<std::string>(), expected);
+  EXPECT_EQ(std::ranges::to<std::string>(moved), expected);
+  EXPECT_EQ(std::ranges::to<std::string>(moved), expected);
   std::string pushed;
   const auto again = knot::read<streaming_shapes::open>(expected);
   knot::write_chunks([&](std::string_view piece) { pushed += piece; }, again);

@@ -188,7 +188,7 @@ int main() {
   // The same response as Canonical JSON, written by knot, read back strictly.
   const std::string canonical = [&] {
     auto got = knot::try_read<matrix_sync::response>(text);
-    return knot::to_json(*got) | std::ranges::to<std::string>();
+    return std::ranges::to<std::string>(knot::to_json(*got));
   }();
   const auto strict = measure([&] {
     auto got = knot::try_read<matrix_sync::response>(canonical, knot::canonical);
@@ -200,7 +200,7 @@ int main() {
   // Writing it: the lazy view, gathered into a string.
   const auto typed_response = *knot::try_read<matrix_sync::response>(text);
   const auto written = measure([&] {
-    auto out = knot::to_json(typed_response) | std::ranges::to<std::string>();
+    auto out = std::ranges::to<std::string>(knot::to_json(typed_response));
     if (out.size() != canonical.size()) std::abort();
   });
   const auto eager = measure([&] {

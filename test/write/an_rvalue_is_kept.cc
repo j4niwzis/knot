@@ -9,7 +9,7 @@ namespace {
 
 TEST(Write, AnRvalueIsKept) {
   auto view = knot::to_json(event{"kept", 1, {"$a"}});
-  EXPECT_EQ(view | std::ranges::to<std::string>(),
+  EXPECT_EQ(std::ranges::to<std::string>(view),
             R"({"content":"kept","depth":1,"prev":["$a"]})");
 }
 
