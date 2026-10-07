@@ -1160,6 +1160,137 @@ constexpr bool keep_rest(Cursor& in, raw& kept, std::string_view key, const At&)
   return true;
 }
 
+// A knot::tagged a level or more below the object whose key chooses it --
+// an event's unsigned.prev_content, chosen by the event's type: its own
+// object has no such key, so its text is kept as it is read (a deferring
+// tagged's), and read into the alternative once the object above that has
+// the key is done -- as a tag that comes after its content is. Found at
+// compile time: what holds no such tagged costs nothing.
+template <class Type>
+struct unwrapped {
+  using type = Type;
+};
+template <class Type>
+struct unwrapped<std::optional<Type>> {
+  using type = Type;
+};
+
+// The key, a string member of Above at KeyRank, a tagged below is chosen by.
+template <class Above, std::size_t KeyRank>
+inline constexpr std::string_view key_above = key_text<Above, KeyRank>;
+
+template <class Type, class Above, std::size_t KeyRank>
+constexpr bool holds_orphan();
+
+// Whether a member of Holder, of type Member, is or holds a tagged chosen by
+// the key that Holder has no key for.
+template <class Holder, class Member, class Above, std::size_t KeyRank>
+constexpr bool member_orphan() {
+  constexpr std::string_view key = key_above<Above, KeyRank>;
+  using inner = typename unwrapped<Member>::type;
+  if constexpr (is_by<inner>::value) {
+    if constexpr (deferring<inner>) {
+      return inner::tag_key == key &&
+             rank_of<Holder>(key, std::make_index_sequence<schema<Holder>::size>{}) == schema<Holder>::size;
+    } else {
+      return false;
+    }
+  } else if constexpr (described<inner>) {
+    return holds_orphan<inner, Above, KeyRank>();
+  } else {
+    return false;
+  }
+}
+
+template <class Type, class Above, std::size_t KeyRank, std::size_t... Rank>
+constexpr bool any_member_orphan(std::index_sequence<Rank...>) {
+  return (false || ... || member_orphan<Type, field_t<Type, order_of<Type>[Rank]>, Above, KeyRank>());
+}
+template <class Type, class Above, std::size_t KeyRank>
+constexpr bool holds_orphan() {
+  constexpr std::string_view key = key_above<Above, KeyRank>;
+  // An object that has the key itself chooses what is below it.
+  if constexpr (rank_of<Type>(key, std::make_index_sequence<schema<Type>::size>{}) != schema<Type>::size) {
+    return false;
+  } else {
+    return any_member_orphan<Type, Above, KeyRank>(std::make_index_sequence<schema<Type>::size>{});
+  }
+}
+
+template <class Above, std::size_t KeyRank, class Type>
+constexpr void settle_orphans(Type& made, std::string_view tag);
+
+template <class Holder, class Above, std::size_t KeyRank, class Member>
+constexpr void settle_orphan_member(Member& member, std::string_view tag) {
+  using inner = typename unwrapped<Member>::type;
+  if constexpr (member_orphan<Holder, Member, Above, KeyRank>()) {
+    if constexpr (is_optional<Member>::value) {
+      if (member) settle_orphan_member<Holder, Above, KeyRank>(*member, tag);
+    } else if constexpr (is_by<inner>::value) {
+      (void)settle_by(member, tag);
+    } else {
+      settle_orphans<Above, KeyRank>(member, tag);
+    }
+  }
+}
+
+template <class Above, std::size_t KeyRank, class Type, std::size_t... Rank>
+constexpr void settle_orphan_members(Type& made, std::string_view tag, std::index_sequence<Rank...>) {
+  (settle_orphan_member<Type, Above, KeyRank>(boost::pfr::get<order_of<Type>[Rank]>(made), tag), ...);
+}
+template <class Above, std::size_t KeyRank, class Type>
+constexpr void settle_orphans(Type& made, std::string_view tag) {
+  settle_orphan_members<Above, KeyRank>(made, tag, std::make_index_sequence<schema<Type>::size>{});
+}
+
+// After an object is read: each of its string members whose key chooses a
+// tagged below another of its members, given to that tagged.
+// Whether a member of Type, at Rank, holds a tagged chosen by Type's key at
+// Key; and that tagged given the key's value. Functions of their own, Key and
+// Rank plain template parameters: a lambda nested in a fold over Key took
+// another pack element than its own (clang).
+template <class Type, std::size_t Key, std::size_t Rank>
+constexpr bool member_below() {
+  using inner = typename unwrapped<field_t<Type, order_of<Type>[Rank]>>::type;
+  if constexpr (described<inner>) {
+    return holds_orphan<inner, Type, Key>();
+  } else {
+    return false;
+  }
+}
+template <class Type, std::size_t Key, std::size_t Rank>
+constexpr void settle_member_below(Type& out, std::string_view tag) {
+  if constexpr (member_below<Type, Key, Rank>()) {
+    using member = field_t<Type, order_of<Type>[Rank]>;
+    auto& held = boost::pfr::get<order_of<Type>[Rank]>(out);
+    if constexpr (is_optional<member>::value) {
+      if (held) settle_orphans<Type, Key>(*held, tag);
+    } else {
+      settle_orphans<Type, Key>(held, tag);
+    }
+  }
+}
+template <class Type, std::size_t Key, std::size_t... Rank>
+constexpr void settle_key_below(Type& out, bool seen, std::index_sequence<Rank...>) {
+  if constexpr (std::same_as<field_t<Type, order_of<Type>[Key]>, std::string>) {
+    if constexpr ((false || ... || member_below<Type, Key, Rank>())) {
+      if (!seen) return;
+      const std::string_view tag = boost::pfr::get<order_of<Type>[Key]>(out);
+      (settle_member_below<Type, Key, Rank>(out, tag), ...);
+    }
+  }
+}
+// After an object is read: each of its string members whose key chooses a
+// tagged below another of its members, given to that tagged.
+template <class Type, std::size_t Size, std::size_t... Key>
+constexpr void settle_below_keys(Type& out, const std::array<bool, Size>& seen, std::index_sequence<Key...>) {
+  (settle_key_below<Type, Key>(out, seen[Key], std::make_index_sequence<Size>{}), ...);
+}
+template <class Type, std::size_t Size>
+constexpr void settle_below(Type& out, const std::array<bool, Size>& seen) {
+  settle_below_keys(out, seen, std::make_index_sequence<Size>{});
+}
+
 template <bool Canonical, class Type, class Cursor>
 constexpr bool read_object(Cursor& in, Type& out) {
   constexpr std::size_t size = schema<Type>::size;
@@ -1266,6 +1397,7 @@ constexpr bool read_object(Cursor& in, Type& out) {
     return (true && ... && settle_member<Type, Rank>(out, seen));
   }(std::make_index_sequence<size>{});
   if (!settled) return in.fail_at("knot: content its type does not name", end);
+  settle_below(out, seen);
   return true;
 }
 
