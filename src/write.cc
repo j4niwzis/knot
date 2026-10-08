@@ -132,7 +132,7 @@ class array_frame {
       return step::piece(",");
     }
     comma_ = false;
-    return child_step(values_[at_++], machine);
+    return ::knot::detail::lazy::child_step(values_[at_++], machine);
   }
 
  private:
@@ -176,7 +176,7 @@ class map_frame {
       return step::piece(":");
     }
     stage_ = 0;
-    return child_step((at_++)->second, machine);
+    return ::knot::detail::lazy::child_step((at_++)->second, machine);
   }
 
  private:
@@ -237,7 +237,7 @@ class object_frame {
   constexpr step member_of(std::size_t rank, Machine& machine, std::index_sequence<Rank...>) const {
     step found;
     (void)((rank == Rank
-          ? (found = child_step(boost::pfr::get<order_of<Type>[Rank]>(value_), machine), true)
+          ? (found = ::knot::detail::lazy::child_step(boost::pfr::get<order_of<Type>[Rank]>(value_), machine), true)
           : false) ||
      ...);
     return found;
@@ -293,7 +293,7 @@ class owned_frame {
   constexpr step next(Machine& machine) {
     if (started_) return step::done();
     started_ = true;
-    return child_step(*tree_, machine);
+    return ::knot::detail::lazy::child_step(*tree_, machine);
   }
 
  private:
@@ -304,14 +304,14 @@ class owned_frame {
 template <class Type, class Machine>
 constexpr step child_step(const Type& value, Machine& machine) {
   if constexpr (transparent<Type>) {
-    return child_step(boost::pfr::get<0>(value), machine);
+    return ::knot::detail::lazy::child_step(boost::pfr::get<0>(value), machine);
   } else if constexpr (requires { value.reading; value.data(); }) {
     if (!value.unknown.is_null())
       return machine.template enter<owned_frame>(as_tree(value));
-    return spl::visit([&](const auto& held) { return child_step(held, machine); },
+    return spl::visit([&](const auto& held) { return ::knot::detail::lazy::child_step(held, machine); },
                          value.data());
   } else if constexpr (std::same_as<Type, knot::value>) {
-    return spl::visit([&](const auto& held) { return child_step(held, machine); },
+    return spl::visit([&](const auto& held) { return ::knot::detail::lazy::child_step(held, machine); },
                          value.data());
   } else if constexpr (std::same_as<Type, knot::raw>) {
     return step::piece(value.text);
@@ -329,7 +329,7 @@ constexpr step child_step(const Type& value, Machine& machine) {
     if constexpr (std::is_signed_v<Type>) return step::whole(static_cast<std::int64_t>(value));
     else return step::whole(static_cast<std::uint64_t>(value));
   } else if constexpr (is_optional<Type>::value) {
-    return value ? child_step(*value, machine) : step::piece("null");
+    return value ? ::knot::detail::lazy::child_step(*value, machine) : step::piece("null");
   } else if constexpr (is_map<Type>::value) {
     return machine.template enter<map_frame<Type>>(value);
   } else if constexpr (is_vector<Type>::value) {
@@ -428,7 +428,7 @@ class machine {
  public:
   constexpr void start(const Root& value) {
     reset();
-    first_ = child_step(value, *this);
+    first_ = ::knot::detail::lazy::child_step(value, *this);
   }
 
   constexpr void reset() {
@@ -713,15 +713,15 @@ constexpr void put_number(Out& out, Number number) {
 template <class Out, class Type>
 constexpr void put(Out& out, const Type& value) {
   if constexpr (transparent<Type>) {
-    put(out, boost::pfr::get<0>(value));
+    ::knot::detail::eager::put(out, boost::pfr::get<0>(value));
   } else if constexpr (requires { value.reading; value.data(); }) {
     if (!value.unknown.is_null()) {
-      put(out, as_tree(value));
+      ::knot::detail::eager::put(out, as_tree(value));
     } else {
-      spl::visit([&](const auto& held) { put(out, held); }, value.data());
+      spl::visit([&](const auto& held) { ::knot::detail::eager::put(out, held); }, value.data());
     }
   } else if constexpr (std::same_as<Type, knot::value>) {
-    spl::visit([&](const auto& held) { put(out, held); }, value.data());
+    spl::visit([&](const auto& held) { ::knot::detail::eager::put(out, held); }, value.data());
   } else if constexpr (std::same_as<Type, knot::raw>) {
     out += value.text;
   } else if constexpr (std::same_as<Type, std::nullptr_t>) {
@@ -735,7 +735,7 @@ constexpr void put(Out& out, const Type& value) {
   } else if constexpr (is_choice<Type>::value) {
     put_string(out, choice<Type>::name(value));
   } else if constexpr (is_optional<Type>::value) {
-    if (value) put(out, *value);
+    if (value) ::knot::detail::eager::put(out, *value);
     else out += "null";
   } else if constexpr (is_vector<Type>::value) {
     out += '[';
@@ -743,7 +743,7 @@ constexpr void put(Out& out, const Type& value) {
     for (const auto& one : value) {
       if (!first) out += ',';
       first = false;
-      put(out, one);
+      ::knot::detail::eager::put(out, one);
     }
     out += ']';
   } else if constexpr (is_map<Type>::value) {
@@ -754,14 +754,14 @@ constexpr void put(Out& out, const Type& value) {
       first = false;
       put_string(out, key);
       out += ':';
-      put(out, one);
+      ::knot::detail::eager::put(out, one);
     }
     out += '}';
   } else if constexpr (described<Type>) {
     if constexpr (keeps_rest<Type>) {
       const auto& kept = boost::pfr::get<schema_of<Type>.rest_member()>(value);
       if (!rest_empty(kept)) {
-        put(out, to_value(value));
+        ::knot::detail::eager::put(out, to_value(value));
         return;
       }
     }
@@ -779,7 +779,7 @@ constexpr void put(Out& out, const Type& value) {
          if (!first) out += ',';
          first = false;
          out.append(key_literal<Type, Rank>.view());
-         put(out, member);
+         ::knot::detail::eager::put(out, member);
        }()),
        ...);
     }(std::make_index_sequence<schema<Type>::size>{});

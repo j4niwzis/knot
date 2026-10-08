@@ -303,7 +303,7 @@ constexpr void append_pattern(std::string& out);
 template <class Element>
 constexpr void append_array(std::string& out, bool groups) {
   std::string element;
-  append_pattern<Element>(element);
+  ::knot::detail::append_pattern<Element>(element);
   const std::string once = groups ? "(" + element + ")" : element;
   out += "\\[(?:" + once + "(?:," + once + ")*)?\\]";
 }
@@ -322,7 +322,7 @@ constexpr void append_object(std::string& out, bool places) {
        if (places) {
          out += "{}";
        } else {
-         append_pattern<field_t<Type, member>>(out);
+         ::knot::detail::append_pattern<field_t<Type, member>>(out);
        }
      }()),
      ...);
@@ -333,7 +333,7 @@ constexpr void append_object(std::string& out, bool places) {
 template <class Type>
 constexpr void append_pattern(std::string& out) {
   if constexpr (transparent<Type>) {
-    append_pattern<transparent_t<Type>>(out);
+    ::knot::detail::append_pattern<transparent_t<Type>>(out);
   } else if constexpr (std::same_as<Type, std::string>) {
     out += patterns::string;
   } else if constexpr (std::same_as<Type, bool>) {
@@ -446,7 +446,7 @@ constexpr std::string scan_format_text() {
 template <class Type>
 constexpr std::string pattern_text() {
   std::string out;
-  append_pattern<Type>(out);
+  ::knot::detail::append_pattern<Type>(out);
   return out;
 }
 

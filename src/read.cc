@@ -999,7 +999,7 @@ constexpr bool read_array(Cursor& in, std::vector<Element, Allocator>& out) {
     return true;
   }
   for (;;) {
-    if (!read_value<Canonical>(in, out.emplace_back())) return false;
+    if (!::knot::detail::read_value<Canonical>(in, out.emplace_back())) return false;
     space<Canonical>(in);
     if (in.peek() == ',') {
       in.next();
@@ -1095,7 +1095,7 @@ constexpr bool read_member(Cursor& in, Type& out, const std::array<bool, Size>& 
     }
     return read_by<Canonical>(in, member);
   } else {
-    return read_value<Canonical>(in, member);
+    return ::knot::detail::read_value<Canonical>(in, member);
   }
 }
 
@@ -1429,7 +1429,7 @@ constexpr bool read_flat_map(Cursor& in, Map& out) {
       space<Canonical>(in);
       if (!in.expect(':', "knot: expected ':'")) return false;
       space<Canonical>(in);
-      if (!read_value<Canonical>(in, values.emplace_back())) return false;
+      if (!::knot::detail::read_value<Canonical>(in, values.emplace_back())) return false;
       space<Canonical>(in);
       if (in.peek() == ',') {
         in.next();
@@ -1497,7 +1497,7 @@ constexpr bool read_map(Cursor& in, Map& out) {
     const auto [entry, made] = out.try_emplace(std::move(key));
     if (!made) return in.fail_at("knot: a key twice", at);
     previous = entry->first;
-    if (!read_value<Canonical>(in, entry->second)) return false;
+    if (!::knot::detail::read_value<Canonical>(in, entry->second)) return false;
     space<Canonical>(in);
     if (in.peek() == ',') {
       in.next();
@@ -1841,7 +1841,7 @@ constexpr value object_to_tree(Type&& made, const bool* seen) {
     (([&] {
        if constexpr (keeps_rest<plain> &&
                      order_of<plain>[Rank] == schema_of<plain>.rest_member()) {
-         kept = to_tree(std::move(boost::pfr::get<order_of<plain>[Rank]>(made)));
+         kept = ::knot::detail::to_tree(std::move(boost::pfr::get<order_of<plain>[Rank]>(made)));
          return;
        }
        if (seen && !seen[Rank]) return;
@@ -1850,14 +1850,14 @@ constexpr value object_to_tree(Type&& made, const bool* seen) {
        if constexpr (is_optional<member_type>::value) {
          if (!member) return;
          keys.emplace_back(key_text<plain, Rank>);
-         values.push_back(to_tree(std::move(*member)));
+         values.push_back(::knot::detail::to_tree(std::move(*member)));
        } else if constexpr (may_be_absent<member_type>::value) {
          if (!present(member)) return;
          keys.emplace_back(key_text<plain, Rank>);
-         values.push_back(to_tree(std::move(member)));
+         values.push_back(::knot::detail::to_tree(std::move(member)));
        } else {
          keys.emplace_back(key_text<plain, Rank>);
-         values.push_back(to_tree(std::move(member)));
+         values.push_back(::knot::detail::to_tree(std::move(member)));
        }
      }()),
      ...);
@@ -1871,7 +1871,7 @@ template <class Type>
 constexpr value to_tree(Type&& made) {
   using plain = std::remove_cvref_t<Type>;
   if constexpr (transparent<plain>) {
-    return to_tree(std::move(boost::pfr::get<0>(made)));
+    return ::knot::detail::to_tree(std::move(boost::pfr::get<0>(made)));
   } else if constexpr (std::same_as<plain, value>) {
     return std::move(made);
   } else if constexpr (std::same_as<plain, raw>) {
@@ -1888,23 +1888,23 @@ constexpr value to_tree(Type&& made) {
     return value(std::string(choice<plain>::name(made)));
   } else if constexpr (is_optional<plain>::value) {
     if (!made) return value();
-    return to_tree(std::move(*made));
+    return ::knot::detail::to_tree(std::move(*made));
   } else if constexpr (is_vector<plain>::value) {
     value::array items;
     items.reserve(made.size());
-    for (auto& one : made) items.push_back(to_tree(std::move(one)));
+    for (auto& one : made) items.push_back(::knot::detail::to_tree(std::move(one)));
     return value(std::move(items));
   } else if constexpr (is_map<plain>::value) {
     value::object members;
     for (auto&& [key, one] : made) {
-      members.emplace_hint(members.end(), std::string(key), to_tree(std::move(one)));
+      members.emplace_hint(members.end(), std::string(key), ::knot::detail::to_tree(std::move(one)));
     }
     return value(std::move(members));
   } else if constexpr (is_by<plain>::value) {
-    return spl::visit([](auto& held) { return to_tree(std::move(held)); },
+    return spl::visit([](auto& held) { return ::knot::detail::to_tree(std::move(held)); },
                       made.data());
   } else if constexpr (described<plain>) {
-    return object_to_tree(std::move(made), nullptr);
+    return ::knot::detail::object_to_tree(std::move(made), nullptr);
   } else {
     static_assert(false, "knot: this type has no JSON form");
   }
@@ -1916,7 +1916,7 @@ template <class Type>
 constexpr bool tree_fits(const value& tree) {
   const auto& held = tree.data();
   if constexpr (transparent<Type>) {
-    return tree_fits<transparent_t<Type>>(tree);
+    return ::knot::detail::tree_fits<transparent_t<Type>>(tree);
   } else if constexpr (std::same_as<Type, value>) {
     return true;
   } else if constexpr (std::same_as<Type, raw>) {
@@ -1933,19 +1933,19 @@ constexpr bool tree_fits(const value& tree) {
     const auto* one = spl::get_if<std::string>(&held);
     return one && (choice<Type>::open || choice<Type>::find(*one) != choice<Type>::count);
   } else if constexpr (is_optional<Type>::value) {
-    return tree.is_null() || tree_fits<typename Type::value_type>(tree);
+    return tree.is_null() || ::knot::detail::tree_fits<typename Type::value_type>(tree);
   } else if constexpr (is_vector<Type>::value) {
     const auto* items = spl::get_if<value::array>(&held);
     if (!items) return false;
     for (const auto& one : *items) {
-      if (!tree_fits<typename Type::value_type>(one)) return false;
+      if (!::knot::detail::tree_fits<typename Type::value_type>(one)) return false;
     }
     return true;
   } else if constexpr (is_map<Type>::value) {
     const auto* members = spl::get_if<value::object>(&held);
     if (!members) return false;
     for (const auto& [key, one] : *members) {
-      if (!tree_fits<typename Type::mapped_type>(one)) return false;
+      if (!::knot::detail::tree_fits<typename Type::mapped_type>(one)) return false;
     }
     return true;
   } else if constexpr (described<Type>) {
@@ -1959,7 +1959,7 @@ constexpr bool tree_fits(const value& tree) {
         }
         const auto found = members->find(key_text<Type, Rank>);
         if (found == members->end()) return may_be_absent<member_type>::value;
-        return tree_fits<member_type>(found->second);
+        return ::knot::detail::tree_fits<member_type>(found->second);
       }());
     }(std::make_index_sequence<schema<Type>::size>{});
   } else {
@@ -1990,7 +1990,7 @@ constexpr bool object_from_tree(value::object& members, Type& out) {
           return false;
         }
       }
-      return from_tree(found->second, member);
+      return ::knot::detail::from_tree(found->second, member);
     }());
   }(std::make_index_sequence<size>{});
 }
@@ -1999,7 +1999,7 @@ template <class Type>
 constexpr bool from_tree(value& tree, Type& out) {
   auto& held = tree.data();
   if constexpr (transparent<Type>) {
-    return from_tree(tree, boost::pfr::get<0>(out));
+    return ::knot::detail::from_tree(tree, boost::pfr::get<0>(out));
   } else if constexpr (std::same_as<Type, value>) {
     out = std::move(tree);
     return true;
@@ -2032,13 +2032,13 @@ constexpr bool from_tree(value& tree, Type& out) {
       out.reset();
       return true;
     }
-    return from_tree(tree, out.emplace());
+    return ::knot::detail::from_tree(tree, out.emplace());
   } else if constexpr (is_vector<Type>::value) {
     auto* items = spl::get_if<value::array>(&held);
     if (!items) return false;
     out.clear();
     for (auto& one : *items) {
-      if (!from_tree(one, out.emplace_back())) return false;
+      if (!::knot::detail::from_tree(one, out.emplace_back())) return false;
     }
     return true;
   } else if constexpr (is_map<Type>::value) {
@@ -2047,14 +2047,14 @@ constexpr bool from_tree(value& tree, Type& out) {
     out.clear();
     for (auto&& [key, one] : *members) {
       typename Type::mapped_type made{};
-      if (!from_tree(one, made)) return false;
+      if (!::knot::detail::from_tree(one, made)) return false;
       out.emplace(std::string(key), std::move(made));
     }
     return true;
   } else if constexpr (described<Type>) {
     auto* members = spl::get_if<value::object>(&held);
     if (!members) return false;
-    return object_from_tree(*members, out);
+    return ::knot::detail::object_from_tree(*members, out);
   } else {
     return false;
   }
@@ -2144,16 +2144,16 @@ template <class Type>
 constexpr value left_over(const value& tree) {
   const auto& held = tree.data();
   if constexpr (transparent<Type>) {
-    return left_over<transparent_t<Type>>(tree);
+    return ::knot::detail::left_over<transparent_t<Type>>(tree);
   } else if constexpr (is_optional<Type>::value) {
-    return tree.is_null() ? value() : left_over<typename Type::value_type>(tree);
+    return tree.is_null() ? value() : ::knot::detail::left_over<typename Type::value_type>(tree);
   } else if constexpr (is_vector<Type>::value) {
     const auto* items = spl::get_if<value::array>(&held);
     if (!items) return value();
     value::array overlays;
     bool any = false;
     for (const auto& one : *items) {
-      overlays.push_back(left_over<typename Type::value_type>(one));
+      overlays.push_back(::knot::detail::left_over<typename Type::value_type>(one));
       any = any || !overlays.back().is_null();
     }
     return any ? value(std::move(overlays)) : value();
@@ -2162,7 +2162,7 @@ constexpr value left_over(const value& tree) {
     if (!members) return value();
     value::object overlay;
     for (const auto& [key, one] : *members) {
-      value inner = left_over<typename Type::mapped_type>(one);
+      value inner = ::knot::detail::left_over<typename Type::mapped_type>(one);
       if (!inner.is_null()) overlay.emplace(std::string(key), std::move(inner));
     }
     return overlay.empty() ? value() : value(std::move(overlay));
@@ -2188,7 +2188,7 @@ constexpr value left_over(const value& tree) {
                          if constexpr (is_optional<member_type>::value) {
                            null_kept = one.is_null();
                          }
-                         found = left_over<member_type>(one);
+                         found = ::knot::detail::left_over<member_type>(one);
                        }(),
                        true)
                     : false) ||
@@ -2228,7 +2228,7 @@ constexpr went array_or_tree(Cursor& in, std::vector<Element, Allocator>& out,
   for (;;) {
     value turned;
     value overlay;
-    const went element = read_or_tree<Canonical>(in, out.emplace_back(), turned,
+    const went element = ::knot::detail::read_or_tree<Canonical>(in, out.emplace_back(), turned,
                                                  extras ? &overlay : nullptr);
     if (element == went::failed) return went::failed;
     if (element == went::tree) {
@@ -2236,7 +2236,7 @@ constexpr went array_or_tree(Cursor& in, std::vector<Element, Allocator>& out,
       value::array items;
       items.reserve(out.size() + 1);
       for (std::size_t at = 0; at != out.size(); ++at) {
-        items.push_back(to_tree(std::move(out[at])));
+        items.push_back(::knot::detail::to_tree(std::move(out[at])));
         if (at < overlays.size()) lay(items.back(), std::move(overlays[at]));
       }
       items.push_back(std::move(turned));
@@ -2291,13 +2291,13 @@ constexpr went map_or_tree(Cursor& in, Map& out, value& tree, value* extras) {
     typename Map::mapped_type one{};
     value turned;
     value overlay;
-    const went member = read_or_tree<Canonical>(in, one, turned,
+    const went member = ::knot::detail::read_or_tree<Canonical>(in, one, turned,
                                                 extras ? &overlay : nullptr);
     if (member == went::failed) return went::failed;
     if (member == went::tree) {
       value::object members;
       for (auto&& [had, held] : out) {
-        members.emplace(std::string(had), to_tree(std::move(held)));
+        members.emplace(std::string(had), ::knot::detail::to_tree(std::move(held)));
       }
       value made(std::move(members));
       lay(made, value(std::move(overlays)));
@@ -2339,7 +2339,7 @@ constexpr went object_or_tree(Cursor& in, Type& out, value& tree, value* extras,
   // The members read so far, what was kept beside them and, from here on, the
   // rest of the object: as a tree, with what was read moved into it.
   const auto turn = [&](std::string key, value turned, const std::string& previous) {
-    value made = object_to_tree(std::move(out), seen.data());
+    value made = ::knot::detail::object_to_tree(std::move(out), seen.data());
     lay(made, value(std::move(overlay)));
     auto& members = spl::get<value::object>(made.data());
     members.emplace(std::move(key), std::move(turned));
@@ -2406,7 +2406,7 @@ constexpr went object_or_tree(Cursor& in, Type& out, value& tree, value* extras,
                  ...);
           if (null_kept) return result;
           (void)((rank == Rank
-                      ? (result = read_or_tree<Canonical>(
+                      ? (result = ::knot::detail::read_or_tree<Canonical>(
                              in, boost::pfr::get<order_of<Type>[Rank]>(out), turned,
                              extras ? &inner : nullptr),
                          true)
@@ -2432,7 +2432,7 @@ constexpr went object_or_tree(Cursor& in, Type& out, value& tree, value* extras,
   for (std::size_t rank = 0; rank != size; ++rank) {
     if (!seen[rank] && required_at<Type>[rank]) {
       // Whole, but not this type: what was there, as a tree.
-      tree = object_to_tree(std::move(out), seen.data());
+      tree = ::knot::detail::object_to_tree(std::move(out), seen.data());
       lay(tree, value(std::move(overlay)));
       return went::tree;
     }
@@ -2444,17 +2444,17 @@ constexpr went object_or_tree(Cursor& in, Type& out, value& tree, value* extras,
 template <bool Canonical, class Type, class Cursor>
 constexpr went read_or_tree(Cursor& in, Type& out, value& tree, value* extras) {
   if constexpr (transparent<Type>) {
-    return read_or_tree<Canonical>(in, boost::pfr::get<0>(out), tree, extras);
+    return ::knot::detail::read_or_tree<Canonical>(in, boost::pfr::get<0>(out), tree, extras);
   } else if constexpr (std::same_as<Type, value>) {
     return read_any<Canonical>(in, out) ? went::fit : went::failed;
   } else if constexpr (std::same_as<Type, raw>) {
-    return read_value<Canonical>(in, out) ? went::fit : went::failed;
+    return ::knot::detail::read_value<Canonical>(in, out) ? went::fit : went::failed;
   } else if constexpr (std::same_as<Type, std::string>) {
     if (in.peek() != '"') return all_tree<Canonical>(in, tree);
     return read_string<Canonical>(in, out) ? went::fit : went::failed;
   } else if constexpr (std::same_as<Type, bool>) {
     if (in.peek() != 't' && in.peek() != 'f') return all_tree<Canonical>(in, tree);
-    return read_value<Canonical>(in, out) ? went::fit : went::failed;
+    return ::knot::detail::read_value<Canonical>(in, out) ? went::fit : went::failed;
   } else if constexpr (json_integer<Type>) {
     if (in.peek() != '-' && (in.peek() < '0' || in.peek() > '9')) {
       return all_tree<Canonical>(in, tree);
@@ -2489,13 +2489,13 @@ constexpr went read_or_tree(Cursor& in, Type& out, value& tree, value* extras) {
   } else if constexpr (is_optional<Type>::value) {
     // null is kept by a tree and not by an optional: so it turns.
     if (in.peek() == 'n') return all_tree<Canonical>(in, tree);
-    return read_or_tree<Canonical>(in, out.emplace(), tree, extras);
+    return ::knot::detail::read_or_tree<Canonical>(in, out.emplace(), tree, extras);
   } else if constexpr (is_vector<Type>::value) {
     return array_or_tree<Canonical>(in, out, tree, extras);
   } else if constexpr (is_map<Type>::value) {
     return map_or_tree<Canonical>(in, out, tree, extras);
   } else if constexpr (is_by<Type>::value) {
-    return read_value<Canonical>(in, out) ? went::fit : went::failed;
+    return ::knot::detail::read_value<Canonical>(in, out) ? went::fit : went::failed;
   } else if constexpr (described<Type>) {
     return object_or_tree<Canonical>(in, out, tree, extras);
   } else {
@@ -2577,7 +2577,7 @@ constexpr bool read_by(Cursor& in, By& out) {
                      value turned;
                      went made = went::failed;
                      if (!have_key) {
-                       made = read_or_tree<Canonical>(in, held, turned, &out.unknown);
+                       made = ::knot::detail::read_or_tree<Canonical>(in, held, turned, &out.unknown);
                      } else if constexpr (described<held_type>) {
                        made = object_or_tree<Canonical>(in, held, turned, &out.unknown,
                                                         &first_key);
@@ -2648,7 +2648,7 @@ constexpr bool read_by(Cursor& in, By& out) {
   auto& state = out.reading;
   out.unknown = value();
   raw kept;
-  if (!read_value<Canonical>(in, kept)) return false;
+  if (!::knot::detail::read_value<Canonical>(in, kept)) return false;
   if (state.chosen != std::variant_npos) {
     settle_text(out, state.chosen, std::move(kept.text));
   } else {
@@ -2686,18 +2686,18 @@ constexpr bool hands_over(const From& from, const value& overlay) {
         if constexpr (std::same_as<from_member, to_member>) {
           return true;
         } else {
-          value one = to_tree(from_member(boost::pfr::get<order_of<From>[there]>(from)));
+          value one = ::knot::detail::to_tree(from_member(boost::pfr::get<order_of<From>[there]>(from)));
           if (kept) {
             if (const auto found = kept->find(key); found != kept->end()) {
               lay(one, found->second);
             }
           }
-          return tree_fits<to_member>(one);
+          return ::knot::detail::tree_fits<to_member>(one);
         }
       } else {
         if (kept) {
           if (const auto found = kept->find(key); found != kept->end()) {
-            return tree_fits<to_member>(found->second);
+            return ::knot::detail::tree_fits<to_member>(found->second);
           }
         }
         return is_optional<to_member>::value;
@@ -2732,16 +2732,16 @@ constexpr void hand_over(From& from, value& overlay, To& to, value& rest) {
              left.emplace(std::string(key), std::move(*inner));
            }
          } else {
-           value one = to_tree(std::move(had));
+           value one = ::knot::detail::to_tree(std::move(had));
            if (value* inner = take(key)) lay(one, std::move(*inner));
-           value extra = left_over<to_member>(one);
-           from_tree(one, into);
+           value extra = ::knot::detail::left_over<to_member>(one);
+           ::knot::detail::from_tree(one, into);
            if (!extra.is_null()) left.emplace(std::string(key), std::move(extra));
          }
        } else if (value* found = take(key)) {
          const bool null_kept = is_optional<to_member>::value && found->is_null();
-         value extra = left_over<to_member>(*found);
-         from_tree(*found, into);
+         value extra = ::knot::detail::left_over<to_member>(*found);
+         ::knot::detail::from_tree(*found, into);
          if (!extra.is_null() || null_kept) left.emplace(std::string(key), std::move(extra));
        }
      }()),
@@ -2762,7 +2762,7 @@ constexpr void hand_over(From& from, value& overlay, To& to, value& rest) {
              return;
            }
          }
-         value one = to_tree(std::move(had));
+         value one = ::knot::detail::to_tree(std::move(had));
          if (value* inner = take(key)) lay(one, std::move(*inner));
          left.emplace(std::string(key), std::move(one));
        }
@@ -2831,7 +2831,7 @@ constexpr bool settle_by(By& out, std::string_view tag) {
   if (state.in_tree) {
     tree = std::move(state.tree);
   } else {
-    tree = spl::visit([](auto& held) { return to_tree(std::move(held)); }, out.data());
+    tree = spl::visit([](auto& held) { return ::knot::detail::to_tree(std::move(held)); }, out.data());
     lay(tree, std::move(out.unknown));
   }
   out.unknown = value();
@@ -2846,10 +2846,10 @@ constexpr bool settle_by(By& out, std::string_view tag) {
                        out.data().template emplace<At>(std::move(tree));
                        return true;
                      } else {
-                       if (!tree_fits<typed_type>(tree)) return false;
-                       value rest = left_over<typed_type>(tree);
+                       if (!::knot::detail::tree_fits<typed_type>(tree)) return false;
+                       value rest = ::knot::detail::left_over<typed_type>(tree);
                        typed_type typed{};
-                       if (!from_tree(tree, typed)) return false;
+                       if (!::knot::detail::from_tree(tree, typed)) return false;
                        out.data().template emplace<At>(std::move(typed));
                        out.unknown = std::move(rest);
                        return true;
@@ -2871,7 +2871,7 @@ constexpr bool settle_by(By& out, std::string_view tag) {
 template <bool Canonical, class Type, class Cursor>
 constexpr bool read_value(Cursor& in, Type& out) {
   if constexpr (transparent<Type>) {
-    return read_value<Canonical>(in, boost::pfr::get<0>(out));
+    return ::knot::detail::read_value<Canonical>(in, boost::pfr::get<0>(out));
   } else if constexpr (std::same_as<Type, std::string>) {
     return read_string<Canonical>(in, out);
   } else if constexpr (std::same_as<Type, bool>) {
@@ -2913,7 +2913,7 @@ constexpr bool read_value(Cursor& in, Type& out) {
       out.reset();
       return in.literal("null", "knot: not a value");
     }
-    return read_value<Canonical>(in, out.emplace());
+    return ::knot::detail::read_value<Canonical>(in, out.emplace());
   } else if constexpr (is_vector<Type>::value) {
     return read_array<Canonical>(in, out);
   } else if constexpr (is_map<Type>::value) {
@@ -2930,7 +2930,7 @@ constexpr std::expected<Type, error> read_whole(Iterator at, Sentinel end) {
   cursor<Iterator, Sentinel> in(std::move(at), std::move(end));
   Type made{};
   space<Canonical>(in);
-  if (read_value<Canonical>(in, made)) {
+  if (::knot::detail::read_value<Canonical>(in, made)) {
     space<Canonical>(in);
     if (!in.at_end()) in.fail("knot: something after the document");
   }
