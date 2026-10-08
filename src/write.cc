@@ -254,9 +254,9 @@ class object_frame {
                 ? (found = [&] {
                      const auto& held =
                          boost::pfr::get<order_of<Type>[Rank]>(value_);
-                     if constexpr (is_optional<
+                     if constexpr (may_be_absent<
                                        std::remove_cvref_t<decltype(held)>>::value) {
-                       return held.has_value();
+                       return present(held);
                      } else {
                        return true;
                      }
@@ -303,7 +303,9 @@ class owned_frame {
 
 template <class Type, class Machine>
 constexpr step child_step(const Type& value, Machine& machine) {
-  if constexpr (requires { value.reading; value.data(); }) {
+  if constexpr (transparent<Type>) {
+    return child_step(boost::pfr::get<0>(value), machine);
+  } else if constexpr (requires { value.reading; value.data(); }) {
     if (!value.unknown.is_null())
       return machine.template enter<owned_frame>(as_tree(value));
     return spl::visit([&](const auto& held) { return child_step(held, machine); },
@@ -358,7 +360,9 @@ consteval auto alternatives_of(tagged<Tag, Alternatives...>*) {
 // frames reachable from this document belong to its machine's variant.
 template <class Type>
 consteval auto children_of() {
-  if constexpr (is_optional<Type>::value || is_vector<Type>::value) {
+  if constexpr (transparent<Type>) {
+    return types<transparent_t<Type>>{};
+  } else if constexpr (is_optional<Type>::value || is_vector<Type>::value) {
     return types<typename Type::value_type>{};
   } else if constexpr (is_map<Type>::value) {
     return types<typename Type::mapped_type>{};
@@ -708,7 +712,9 @@ constexpr void put_number(Out& out, Number number) {
 
 template <class Out, class Type>
 constexpr void put(Out& out, const Type& value) {
-  if constexpr (requires { value.reading; value.data(); }) {
+  if constexpr (transparent<Type>) {
+    put(out, boost::pfr::get<0>(value));
+  } else if constexpr (requires { value.reading; value.data(); }) {
     if (!value.unknown.is_null()) {
       put(out, as_tree(value));
     } else {
@@ -767,8 +773,8 @@ constexpr void put(Out& out, const Type& value) {
            if (order_of<Type>[Rank] == schema_of<Type>.rest_member()) return;
          }
          const auto& member = boost::pfr::get<order_of<Type>[Rank]>(value);
-         if constexpr (is_optional<std::remove_cvref_t<decltype(member)>>::value) {
-           if (!member) return;
+         if constexpr (may_be_absent<std::remove_cvref_t<decltype(member)>>::value) {
+           if (!present(member)) return;
          }
          if (!first) out += ',';
          first = false;

@@ -1851,6 +1851,10 @@ constexpr value object_to_tree(Type&& made, const bool* seen) {
          if (!member) return;
          keys.emplace_back(key_text<plain, Rank>);
          values.push_back(to_tree(std::move(*member)));
+       } else if constexpr (may_be_absent<member_type>::value) {
+         if (!present(member)) return;
+         keys.emplace_back(key_text<plain, Rank>);
+         values.push_back(to_tree(std::move(member)));
        } else {
          keys.emplace_back(key_text<plain, Rank>);
          values.push_back(to_tree(std::move(member)));
@@ -1866,7 +1870,9 @@ constexpr value object_to_tree(Type&& made, const bool* seen) {
 template <class Type>
 constexpr value to_tree(Type&& made) {
   using plain = std::remove_cvref_t<Type>;
-  if constexpr (std::same_as<plain, value>) {
+  if constexpr (transparent<plain>) {
+    return to_tree(std::move(boost::pfr::get<0>(made)));
+  } else if constexpr (std::same_as<plain, value>) {
     return std::move(made);
   } else if constexpr (std::same_as<plain, raw>) {
     // Asked for as a tree, where a program still wants one: read now.
@@ -1909,7 +1915,9 @@ constexpr value to_tree(Type&& made) {
 template <class Type>
 constexpr bool tree_fits(const value& tree) {
   const auto& held = tree.data();
-  if constexpr (std::same_as<Type, value>) {
+  if constexpr (transparent<Type>) {
+    return tree_fits<transparent_t<Type>>(tree);
+  } else if constexpr (std::same_as<Type, value>) {
     return true;
   } else if constexpr (std::same_as<Type, raw>) {
     // Text is not made back from a tree: raw is only ever read.
@@ -1950,7 +1958,7 @@ constexpr bool tree_fits(const value& tree) {
           if (order_of<Type>[Rank] == schema_of<Type>.rest_member()) return true;
         }
         const auto found = members->find(key_text<Type, Rank>);
-        if (found == members->end()) return is_optional<member_type>::value;
+        if (found == members->end()) return may_be_absent<member_type>::value;
         return tree_fits<member_type>(found->second);
       }());
     }(std::make_index_sequence<schema<Type>::size>{});
@@ -1975,8 +1983,8 @@ constexpr bool object_from_tree(value::object& members, Type& out) {
       }
       const auto found = members.find(key_text<Type, Rank>);
       if (found == members.end()) {
-        if constexpr (is_optional<member_type>::value) {
-          member.reset();
+        if constexpr (may_be_absent<member_type>::value) {
+          make_absent(member);
           return true;
         } else {
           return false;
@@ -1990,7 +1998,9 @@ constexpr bool object_from_tree(value::object& members, Type& out) {
 template <class Type>
 constexpr bool from_tree(value& tree, Type& out) {
   auto& held = tree.data();
-  if constexpr (std::same_as<Type, value>) {
+  if constexpr (transparent<Type>) {
+    return from_tree(tree, boost::pfr::get<0>(out));
+  } else if constexpr (std::same_as<Type, value>) {
     out = std::move(tree);
     return true;
   } else if constexpr (std::same_as<Type, raw>) {
@@ -2133,7 +2143,9 @@ constexpr void lay(value& tree, value overlay) {
 template <class Type>
 constexpr value left_over(const value& tree) {
   const auto& held = tree.data();
-  if constexpr (is_optional<Type>::value) {
+  if constexpr (transparent<Type>) {
+    return left_over<transparent_t<Type>>(tree);
+  } else if constexpr (is_optional<Type>::value) {
     return tree.is_null() ? value() : left_over<typename Type::value_type>(tree);
   } else if constexpr (is_vector<Type>::value) {
     const auto* items = spl::get_if<value::array>(&held);
@@ -2431,7 +2443,9 @@ constexpr went object_or_tree(Cursor& in, Type& out, value& tree, value* extras,
 
 template <bool Canonical, class Type, class Cursor>
 constexpr went read_or_tree(Cursor& in, Type& out, value& tree, value* extras) {
-  if constexpr (std::same_as<Type, value>) {
+  if constexpr (transparent<Type>) {
+    return read_or_tree<Canonical>(in, boost::pfr::get<0>(out), tree, extras);
+  } else if constexpr (std::same_as<Type, value>) {
     return read_any<Canonical>(in, out) ? went::fit : went::failed;
   } else if constexpr (std::same_as<Type, raw>) {
     return read_value<Canonical>(in, out) ? went::fit : went::failed;
@@ -2856,7 +2870,9 @@ constexpr bool settle_by(By& out, std::string_view tag) {
 
 template <bool Canonical, class Type, class Cursor>
 constexpr bool read_value(Cursor& in, Type& out) {
-  if constexpr (std::same_as<Type, std::string>) {
+  if constexpr (transparent<Type>) {
+    return read_value<Canonical>(in, boost::pfr::get<0>(out));
+  } else if constexpr (std::same_as<Type, std::string>) {
     return read_string<Canonical>(in, out);
   } else if constexpr (std::same_as<Type, bool>) {
     if (in.peek() == 't') {
@@ -2936,7 +2952,7 @@ export namespace knot {
 // what they are made of -- an array, a map, a string, a choice, a number.
 template <class Type>
 concept document =
-    described<Type> || std::same_as<Type, value> || std::same_as<Type, raw> ||
+    described<Type> || transparent<Type> || std::same_as<Type, value> || std::same_as<Type, raw> ||
     std::same_as<Type, std::string> ||
     std::same_as<Type, bool> || std::same_as<Type, double> || detail::json_integer<Type> ||
     detail::is_choice<Type>::value || detail::is_vector<Type>::value ||

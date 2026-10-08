@@ -332,7 +332,9 @@ constexpr void append_object(std::string& out, bool places) {
 
 template <class Type>
 constexpr void append_pattern(std::string& out) {
-  if constexpr (std::same_as<Type, std::string>) {
+  if constexpr (transparent<Type>) {
+    append_pattern<transparent_t<Type>>(out);
+  } else if constexpr (std::same_as<Type, std::string>) {
     out += patterns::string;
   } else if constexpr (std::same_as<Type, bool>) {
     out += patterns::boolean;
@@ -394,12 +396,37 @@ constexpr std::string key_literal_text() {
 template <class Type, std::size_t Rank>
 inline constexpr auto key_literal = freeze<key_literal_text<Type, Rank>>();
 
+// What may be absent from an object: an optional, or a wrapper of one --
+// written absent where empty, made empty where its key is not there.
+template <class Type>
+struct may_be_absent : is_optional<Type> {};
+template <transparent Type>
+struct may_be_absent<Type> : may_be_absent<transparent_t<Type>> {};
+template <class Type>
+constexpr bool present(const Type& value) {
+  if constexpr (transparent<Type>) {
+    return present(boost::pfr::get<0>(value));
+  } else if constexpr (is_optional<Type>::value) {
+    return value.has_value();
+  } else {
+    return true;
+  }
+}
+template <class Type>
+constexpr void make_absent(Type& value) {
+  if constexpr (transparent<Type>) {
+    make_absent(boost::pfr::get<0>(value));
+  } else {
+    value.reset();
+  }
+}
+
 // Whether the member of each rank has to be there: all but the optional ones,
 // and the one the rest of the keys go to.
 template <class Type, std::size_t... Rank>
 consteval auto required_at_of(std::index_sequence<Rank...>) {
   return std::array<bool, sizeof...(Rank)>{
-      (!is_optional<field_t<Type, order_of<Type>[Rank]>>::value &&
+      (!may_be_absent<field_t<Type, order_of<Type>[Rank]>>::value &&
        order_of<Type>[Rank] != schema_of<Type>.rest_member())...};
 }
 template <class Type>

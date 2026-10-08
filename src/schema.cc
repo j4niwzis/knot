@@ -112,6 +112,18 @@ class schema {
   std::size_t rest_ = size;
 };
 
+// A type that is its one member in JSON: a value given a type of its own --
+// a setting, a name -- read and written as what it holds, so that typing it
+// changes nothing in the JSON. It says so with a member type named
+// json_transparent, which needs nothing of knot to write.
+template <class Type>
+concept transparent = std::is_aggregate_v<Type> && requires {
+  typename Type::json_transparent;
+} && boost::pfr::tuple_size_v<Type> == 1;
+template <transparent Type>
+using transparent_t =
+    std::remove_cvref_t<decltype(boost::pfr::get<0>(std::declval<Type &>()))>;
+
 // A type that says what it is called in JSON.
 template <class Type>
 concept described = std::is_aggregate_v<Type> && requires {
