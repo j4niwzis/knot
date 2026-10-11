@@ -321,6 +321,10 @@ constexpr step child_step(const Type& value, Machine& machine) {
     return step::fraction(value);
   } else if constexpr (std::same_as<Type, std::string>) {
     return step::string(value);
+  } else if constexpr (string_integer<Type>::value) {
+    return spl::visit([&](const auto& held) {
+      return ::knot::detail::lazy::child_step(held, machine);
+    }, value);
   } else if constexpr (is_choice<Type>::value) {
     return step::string(choice<Type>::name(value));
   } else if constexpr (std::same_as<Type, bool>) {
@@ -732,6 +736,8 @@ constexpr void put(Out& out, const Type& value) {
     put_number(out, value);
   } else if constexpr (std::same_as<Type, std::string>) {
     put_string(out, value);
+  } else if constexpr (string_integer<Type>::value) {
+    spl::visit([&](const auto& held) { ::knot::detail::eager::put(out, held); }, value);
   } else if constexpr (is_choice<Type>::value) {
     put_string(out, choice<Type>::name(value));
   } else if constexpr (is_optional<Type>::value) {

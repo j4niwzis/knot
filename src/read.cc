@@ -1884,6 +1884,8 @@ constexpr value to_tree(Type&& made) {
     return value(static_cast<std::int64_t>(made));
   } else if constexpr (std::same_as<plain, double>) {
     return value(made);
+  } else if constexpr (string_integer<plain>::value) {
+    return spl::visit([](auto& held) { return ::knot::detail::to_tree(std::move(held)); }, made);
   } else if constexpr (is_choice<plain>::value) {
     return value(std::string(choice<plain>::name(made)));
   } else if constexpr (is_optional<plain>::value) {
@@ -1929,6 +1931,9 @@ constexpr bool tree_fits(const value& tree) {
     return one && std::in_range<Type>(*one);
   } else if constexpr (std::same_as<Type, double>) {
     return spl::holds_alternative<double>(held) || spl::holds_alternative<std::int64_t>(held);
+  } else if constexpr (string_integer<Type>::value) {
+    return ::knot::detail::tree_fits<std::string>(tree) ||
+           ::knot::detail::tree_fits<typename string_integer<Type>::integer_type>(tree);
   } else if constexpr (is_choice<Type>::value) {
     const auto* one = spl::get_if<std::string>(&held);
     return one && (choice<Type>::open || choice<Type>::find(*one) != choice<Type>::count);
@@ -2023,6 +2028,18 @@ constexpr bool from_tree(value& tree, Type& out) {
     const auto* one = spl::get_if<double>(&held);
     if (!one) return false;
     out = *one;
+    return true;
+  } else if constexpr (string_integer<Type>::value) {
+    using shape = string_integer<Type>;
+    if (tree.is<std::string>()) {
+      std::string text;
+      if (!::knot::detail::from_tree(tree, text)) return false;
+      out.template emplace<shape::string_at>(std::move(text));
+    } else {
+      typename shape::integer_type number{};
+      if (!::knot::detail::from_tree(tree, number)) return false;
+      out.template emplace<shape::integer_at>(number);
+    }
     return true;
   } else if constexpr (is_choice<Type>::value) {
     auto* one = spl::get_if<std::string>(&held);
@@ -2477,6 +2494,18 @@ constexpr went read_or_tree(Cursor& in, Type& out, value& tree, value* extras) {
     if (!read_any_number<Canonical>(in, number)) return went::failed;
     out = as_double(number, minus);
     return went::fit;
+  } else if constexpr (string_integer<Type>::value) {
+    using shape = string_integer<Type>;
+    if (in.peek() == '"') {
+      std::string text;
+      const auto result = ::knot::detail::read_or_tree<Canonical>(in, text, tree, extras);
+      if (result == went::fit) out.template emplace<shape::string_at>(std::move(text));
+      return result;
+    }
+    typename shape::integer_type number{};
+    const auto result = ::knot::detail::read_or_tree<Canonical>(in, number, tree, extras);
+    if (result == went::fit) out.template emplace<shape::integer_at>(number);
+    return result;
   } else if constexpr (is_choice<Type>::value) {
     // A string no alternative is, where none keeps it: a tree, as a number
     // too big for its member is.
@@ -2893,6 +2922,18 @@ constexpr bool read_value(Cursor& in, Type& out) {
     if (!read_any_number<Canonical>(in, number)) return false;
     out = as_double(number, minus);
     return true;
+  } else if constexpr (string_integer<Type>::value) {
+    using shape = string_integer<Type>;
+    if (in.peek() == '"') {
+      std::string text;
+      if (!read_string<Canonical>(in, text)) return false;
+      out.template emplace<shape::string_at>(std::move(text));
+    } else {
+      typename shape::integer_type number{};
+      if (!read_integer<Canonical>(in, number)) return false;
+      out.template emplace<shape::integer_at>(number);
+    }
+    return true;
   } else if constexpr (is_choice<Type>::value) {
     const std::size_t start = in.offset();
     std::string text;
@@ -2955,7 +2996,8 @@ concept document =
     described<Type> || transparent<Type> || std::same_as<Type, value> || std::same_as<Type, raw> ||
     std::same_as<Type, std::string> ||
     std::same_as<Type, bool> || std::same_as<Type, double> || detail::json_integer<Type> ||
-    detail::is_choice<Type>::value || detail::is_vector<Type>::value ||
+    detail::is_choice<Type>::value || detail::string_integer<Type>::value ||
+    detail::is_vector<Type>::value ||
     detail::is_map<Type>::value;
 
 

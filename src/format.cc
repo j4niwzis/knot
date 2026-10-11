@@ -77,6 +77,30 @@ template <class Type>
 concept json_integer =
     std::integral<Type> && !std::same_as<Type, bool> && !character<Type>;
 
+// A protocol field that can be text or an integer. The JSON token chooses
+// its alternative without a tag or a tree; two numeric alternatives would
+// be ambiguous and are deliberately not this shape.
+template <class Integer, std::size_t StringAt>
+struct string_integer_shape : std::true_type {
+  using integer_type = Integer;
+  static constexpr std::size_t string_at = StringAt;
+  static constexpr std::size_t integer_at = 1 - StringAt;
+};
+template <class Type>
+struct string_integer : std::false_type {};
+template <json_integer Integer>
+struct string_integer<spl::variant<std::string, Integer>>
+    : string_integer_shape<Integer, 0> {};
+template <json_integer Integer>
+struct string_integer<spl::variant<Integer, std::string>>
+    : string_integer_shape<Integer, 1> {};
+template <json_integer Integer>
+struct string_integer<std::variant<std::string, Integer>>
+    : string_integer_shape<Integer, 0> {};
+template <json_integer Integer>
+struct string_integer<std::variant<Integer, std::string>>
+    : string_integer_shape<Integer, 1> {};
+
 template <class Type>
 struct is_vector : std::false_type {};
 template <class Element, class Allocator>
@@ -340,6 +364,12 @@ constexpr void append_pattern(std::string& out) {
     out += patterns::boolean;
   } else if constexpr (json_integer<Type>) {
     out += std::is_signed_v<Type> ? patterns::integer : patterns::natural;
+  } else if constexpr (string_integer<Type>::value) {
+    out += "(?:";
+    ::knot::detail::append_pattern<std::string>(out);
+    out += '|';
+    ::knot::detail::append_pattern<typename string_integer<Type>::integer_type>(out);
+    out += ')';
   } else if constexpr (is_choice<Type>::value) {
     if constexpr (choice<Type>::open) {
       out += patterns::string;
