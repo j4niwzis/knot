@@ -707,6 +707,27 @@ constexpr void put_string(Out& out, std::string_view text) {
 template <class Out, class Type>
 constexpr void put(Out& out, const Type& value);
 
+}  // namespace knot::detail::eager
+
+export namespace knot {
+// A type's writing made once (knot::made_once): explicitly instantiated in
+// the interface of the module that owns the type.
+template <class Type>
+struct write_once {
+  static constexpr void write(std::string& out, const Type& value);
+};
+}  // namespace knot
+
+namespace knot::detail::eager {
+
+// A type made once, written into a string: by its write_once, where it was
+// made -- not here.
+template <class Type>
+  requires made_once<Type>
+constexpr void put(std::string& out, const Type& value) {
+  write_once<Type>::write(out, value);
+}
+
 template <class Out, class Number>
 constexpr void put_number(Out& out, Number number) {
   std::array<char, 32> digits{};
@@ -836,16 +857,26 @@ constexpr Out write(Out out, const Type& value) {
   return out;
 }
 
+// What is written into a string whole: a document, or the content a
+// knot::tagged holds -- the alternative it is, with what it did not know laid
+// back in -- as the object it is in has it.
+template <class Type>
+concept writable = document<Type> || requires(const Type& content) {
+  content.reading;
+  content.unknown;
+  content.data();
+};
+
 // A value as Canonical JSON, added to the end of a string at once: no view
 // and no pieces, for where the whole is wanted anyway.
 template <class Type>
-  requires document<std::remove_cvref_t<Type>>
+  requires writable<std::remove_cvref_t<Type>>
 constexpr void write(std::string& out, const Type& value) {
   detail::eager::put(out, value);
 }
 
 template <class Type>
-  requires document<std::remove_cvref_t<Type>>
+  requires writable<std::remove_cvref_t<Type>>
 constexpr std::string to_json_string(const Type& value) {
   std::string out;
   write(out, value);
@@ -911,13 +942,13 @@ constexpr void lay_out(std::string& out, std::string_view json, int indent = 2) 
 }
 
 template <class Type>
-  requires document<std::remove_cvref_t<Type>>
+  requires writable<std::remove_cvref_t<Type>>
 constexpr void write_pretty(std::string& out, const Type& value, int indent = 2) {
   lay_out(out, to_json_string(value), indent);
 }
 
 template <class Type>
-  requires document<std::remove_cvref_t<Type>>
+  requires writable<std::remove_cvref_t<Type>>
 constexpr std::string to_pretty_json_string(const Type& value, int indent = 2) {
   std::string out;
   write_pretty(out, value, indent);
@@ -936,3 +967,12 @@ struct std::formatter<knot::as_json<Type>, char> {
     return knot::write(context.out(), json.value);
   }
 };
+
+export namespace knot {
+
+template <class Type>
+constexpr void write_once<Type>::write(std::string& out, const Type& value) {
+  detail::eager::put<std::string, Type>(out, value);
+}
+
+}  // namespace knot

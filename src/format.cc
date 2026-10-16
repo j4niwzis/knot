@@ -488,4 +488,15 @@ inline constexpr auto scan_format = detail::freeze<detail::scan_format_text<Type
 template <class Type>
 inline constexpr auto pattern = detail::freeze<detail::pattern_text<Type>>();
 
+// A type read and written by functions made once, in the interface of the
+// module that owns it, rather than where it is used: knot::read_once<Type>
+// (from text in memory) and knot::write_once<Type> (into a std::string),
+// explicitly instantiated there -- `template struct knot::read_once<T>;` --
+// so that an importer neither makes nor emits them again, however deep in
+// what it reads they are: what a union of many types read in many units (a
+// protocol's events) asks. They are constexpr, and their definitions are in
+// the module's interface: read at compile time as well.
+template <class Type>
+inline constexpr bool made_once = false;
+
 }  // namespace knot

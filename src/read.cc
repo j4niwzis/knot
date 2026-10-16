@@ -918,6 +918,32 @@ constexpr bool capture_raw(Cursor& in, std::string& text) {
 
 template <bool Canonical, class Type, class Cursor>
 constexpr bool read_value(Cursor& in, Type& out);
+// What reads a value of its type here, whatever it is: read_value's own.
+template <bool Canonical, class Type, class Cursor>
+constexpr bool read_here(Cursor& in, Type& out);
+
+}  // namespace knot::detail
+
+export namespace knot {
+// What text in memory is read with: what a type made once is read from.
+using text_cursor = detail::cursor<std::string_view::const_iterator, std::string_view::const_iterator>;
+// A type's reading made once (knot::made_once): explicitly instantiated in
+// the interface of the module that owns the type.
+template <class Type>
+struct read_once {
+  static constexpr bool read(text_cursor& in, Type& out);
+};
+}  // namespace knot
+
+namespace knot::detail {
+
+// A type made once, read from text in memory: by its read_once, where it
+// was made -- not here.
+template <bool Canonical, class Type, class Cursor>
+  requires(!Canonical && made_once<Type> && std::same_as<Cursor, text_cursor>)
+constexpr bool read_value(Cursor& in, Type& out) {
+  return read_once<Type>::read(in, out);
+}
 
 template <class Type>
 struct is_by : std::false_type {};
@@ -2899,6 +2925,11 @@ constexpr bool settle_by(By& out, std::string_view tag) {
 
 template <bool Canonical, class Type, class Cursor>
 constexpr bool read_value(Cursor& in, Type& out) {
+  return ::knot::detail::read_here<Canonical>(in, out);
+}
+
+template <bool Canonical, class Type, class Cursor>
+constexpr bool read_here(Cursor& in, Type& out) {
   if constexpr (transparent<Type>) {
     return ::knot::detail::read_value<Canonical>(in, boost::pfr::get<0>(out));
   } else if constexpr (std::same_as<Type, std::string>) {
@@ -3099,6 +3130,15 @@ constexpr Type read(Range&& text, canonical_t) {
   auto got = try_read<Type>(std::forward<Range>(text), canonical);
   if (!got) throw read_failure(got.error());
   return std::move(*got);
+}
+
+}  // namespace knot
+
+export namespace knot {
+
+template <class Type>
+constexpr bool read_once<Type>::read(text_cursor& in, Type& out) {
+  return detail::read_here<false>(in, out);
 }
 
 }  // namespace knot
