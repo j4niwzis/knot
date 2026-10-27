@@ -256,7 +256,7 @@ class object_frame {
                          boost::pfr::get<order_of<Type>[Rank]>(value_);
                      if constexpr (may_be_absent<
                                        std::remove_cvref_t<decltype(held)>>::value) {
-                       return present(held);
+                       return ::knot::detail::present(held);
                      } else {
                        return true;
                      }
