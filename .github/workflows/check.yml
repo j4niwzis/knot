@@ -41,13 +41,6 @@ jobs:
             when=$(git log -1 --format=%ct -- "$file")
             [ -n "$when" ] && touch -d "@$when" "$file"
           done
-      - uses: actions/cache@v4
-        with:
-          path: |
-            build
-            .cache/cpm
-          key: build-${{ runner.os }}-clang${{ matrix.llvm }}-${{ github.sha }}
-          restore-keys: build-${{ runner.os }}-clang${{ matrix.llvm }}-
 
       # Clang and libc++, which is where `import std` comes from.
       - name: clang and libc++
@@ -78,6 +71,19 @@ jobs:
           sudo ln -sfn /usr/lib/llvm-${{ matrix.llvm }}/share/libc++/v1 /lib/share/libc++/v1
           sudo ln -sf /usr/lib/llvm-${{ matrix.llvm }}/bin/clang++ /usr/local/bin/clang++
           test -f /lib/share/libc++/v1/std.cppm
+
+      # A nightly compiler cannot read a previous build's module binaries.
+      - name: compiler and standard library identity
+        run: |
+          digest=$({ /usr/local/bin/clang++ --version; sha256sum /lib/share/libc++/v1/std.cppm; } | sha256sum | cut -c1-16)
+          echo "COMPILER_BUILD=$digest" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build
+            .cache/cpm
+          key: build-${{ runner.os }}-clang${{ matrix.llvm }}-${{ env.COMPILER_BUILD }}-${{ github.sha }}
+          restore-keys: build-${{ runner.os }}-clang${{ matrix.llvm }}-${{ env.COMPILER_BUILD }}-
 
       - name: build
         run: |
